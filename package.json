@@ -30,10 +30,12 @@
     "README.md"
   ],
   "publishConfig": {
-    "access": "public",
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
-  
+  "bugs": {
+    "url": "https://github.com/leandroasilva/lmcs-db/issues"
+  },
+  "homepage": "https://github.com/leandroasilva/lmcs-db#readme",
   "dependencies": {
     "uuid": "^11.1.0"
   },
