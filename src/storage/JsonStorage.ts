@@ -5,8 +5,9 @@ import { IDatabaseStorage } from '../interfaces';
 class JsonStorage implements IDatabaseStorage {
   private filePath: string;
 
-  constructor(databaseName: string) {
-    this.filePath = path.resolve(process.cwd(), `${databaseName}.db`);
+  constructor(databaseName: string, customPath?: string) {
+    const basePath = customPath ?? process.cwd();
+    this.filePath = path.resolve(basePath, `${databaseName}.db`);
   }
 
   async save(data: string): Promise<void> {

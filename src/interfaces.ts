@@ -29,6 +29,13 @@ interface FindOptions<T> {
       $gt?: T[key];
       $lt?: T[key];
       $in?: T[key][];
+      $nin?: T[key][];
+      $contains?: T[key];
+      $regex?: RegExp;
+      $exists?: boolean;
+      $startsWith?: string;
+      $endsWith?: string;
+      $between?: [T[key], T[key]];
     };
   };
   limit?: number;
@@ -39,6 +46,7 @@ interface DatabaseConfig {
   encryptionKey?: string;
   storageType: 'memory' | 'json' | 'binary';
   databaseName?: string;
+  customPath?: string;
 }
 
 enum DatabaseStorageType {

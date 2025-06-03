@@ -20,10 +20,10 @@ class LmcsDB {
         this.storage = new InMemoryStorage();
         break;
       case 'json':
-        this.storage = new JsonStorage(config.databaseName || 'default');
+        this.storage = new JsonStorage(config.databaseName || 'default', config.customPath);
         break;
       case 'binary':
-        this.storage = new BinaryStorage(config.databaseName || 'default');
+        this.storage = new BinaryStorage(config.databaseName || 'default', config.customPath);
         break;
       default:
         throw new Error('Invalid storage type');
@@ -104,14 +104,24 @@ class LmcsDB {
         if (options?.filter) {
           documents = documents.filter(doc => {
             return Object.entries(options.filter!).every(([key, value]) => {
+
               // Suporte a operadores básicos
               if (typeof value === 'object') {
                 const operators = value as Record<string, any>;
+
                 if (operators.$eq !== undefined && doc[key as keyof T] !== operators.$eq) return false;
                 if (operators.$ne !== undefined && doc[key as keyof T] === operators.$ne) return false;
                 if (operators.$gt !== undefined && doc[key as keyof T] <= operators.$gt) return false;
                 if (operators.$lt !== undefined && doc[key as keyof T] >= operators.$lt) return false;
                 if (operators.$in !== undefined && !operators.$in.includes(doc[key as keyof T])) return false;
+                if (operators.$nin !== undefined && operators.$nin.includes(doc[key as keyof T])) return false;
+                if (operators.$contains !== undefined && !doc[key as keyof T].includes(operators.$contains)) return false;
+                if (operators.$regex !== undefined && !new RegExp(operators.$regex).test(doc[key as keyof T])) return false;
+                if (operators.$exists !== undefined && doc[key as keyof T] === undefined) return false;
+                if (operators.$startsWith !== undefined && !doc[key as keyof T].startsWith(operators.$startsWith)) return false;
+                if (operators.$endsWith !== undefined && !doc[key as keyof T].endsWith(operators.$endsWith)) return false;
+                if (operators.$between !== undefined && (doc[key as keyof T] < operators.$between[0] || doc[key as keyof T] > operators.$between[1])) return false;
+
                 return true;
               }
               
