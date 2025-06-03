@@ -13,7 +13,7 @@ class LmcsDB {
 
   constructor(config: DatabaseConfig) {
     this.config = config;
-    
+
     // Configurar armazenamento
     switch (config.storageType) {
       case 'memory':
@@ -28,7 +28,7 @@ class LmcsDB {
       default:
         throw new Error('Invalid storage type');
     }
-    
+
     // Configurar criptografia se a chave for fornecida
     if (config.encryptionKey) {
       this.encryptionService = new EncryptionService(config.encryptionKey);
@@ -37,9 +37,9 @@ class LmcsDB {
 
   async initialize(): Promise<void> {
     let rawData = await this.storage.load();
-    
+
     // Decriptografar dados se necessário
-    if (this.encryptionService && rawData && rawData.trim() !== '') {
+    if (this.encryptionService && rawData && rawData.trim() !== '' && rawData !== '{}') {
       try {
         rawData = this.encryptionService.decrypt(rawData);
       } catch (error) {
@@ -47,7 +47,7 @@ class LmcsDB {
         rawData = '{}';
       }
     }
-    
+
     // Parse dos dados
     try {
       this.schema = JSON.parse(rawData || '{}');
@@ -59,12 +59,12 @@ class LmcsDB {
 
   async save(): Promise<void> {
     let rawData = JSON.stringify(this.schema);
-    
+
     // Criptografar dados se necessário
     if (this.encryptionService) {
       rawData = this.encryptionService.encrypt(rawData);
     }
-    
+
     // Salvar dados
     await this.storage.save(rawData);
   }
@@ -97,9 +97,9 @@ class LmcsDB {
       findAll: async (options?: FindOptions<T>): Promise<T[]> => {
         const collection = this.schema.collections[name];
         if (!collection) return [];
-        
+
         let documents = Object.values(collection.documents) as T[];
-        
+
         // Aplicar filtro
         if (options?.filter) {
           documents = documents.filter(doc => {
@@ -124,43 +124,43 @@ class LmcsDB {
 
                 return true;
               }
-              
+
               return doc[key as keyof T] === value;
             });
           });
         }
-        
+
         // Aplicar ordenação
         if (options?.sort) {
           const [sortKey, sortDirection] = Object.entries(options.sort)[0];
           documents.sort((a, b) => {
             const aValue = a[sortKey as keyof T];
             const bValue = b[sortKey as keyof T];
-            
+
             if (aValue < bValue) return sortDirection === 1 ? -1 : 1;
             if (aValue > bValue) return sortDirection === 1 ? 1 : -1;
             return 0;
           });
         }
-        
+
         // Aplicar limite
         if (options?.limit) {
           documents = documents.slice(0, options.limit);
         }
-        
+
         return documents;
       },
 
       update: async (id: string, update: Partial<T>): Promise<T | null> => {
         const collection = this.schema.collections[name];
         if (!collection || !collection.documents[id]) return null;
-        
-        const updatedDoc = { 
-          ...collection.documents[id], 
+
+        const updatedDoc = {
+          ...collection.documents[id],
           ...update,
           _id: id // Garantir que o ID não seja alterado
         } as T;
-        
+
         collection.documents[id] = updatedDoc;
         await this.save();
         return updatedDoc;
@@ -169,17 +169,27 @@ class LmcsDB {
       delete: async (id: string): Promise<boolean> => {
         const collection = this.schema.collections[name];
         if (!collection || !collection.documents[id]) return false;
-        
+
         delete collection.documents[id];
-        
+
         // Se a coleção ficar vazia, remova-a
         if (Object.keys(collection.documents).length === 0) {
           delete this.schema.collections[name];
         }
-        
+
         await this.save();
         return true;
+      },
+
+      count: async (options?: FindOptions<T>): Promise<number> => {
+        if (options) {
+          return (await this.collection(name).findAll(options)).length;
+        }
+
+        const collection = this.schema.collections[name];
+        return collection ? Object.keys(collection.documents).length : 0;
       }
+
     };
   }
 }
