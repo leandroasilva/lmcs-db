@@ -22,9 +22,10 @@ async function demo() {
 
   // Configuração com criptografia
   const db = await DatabaseFactory.create({
-    storageType: DatabaseStorageType.Json,
+    storageType: DatabaseStorageType.Binary,
     databaseName: 'secure-db',
-    encryptionKey: 'my-super-secret-key-123!'
+    customPath: `${process.cwd()}/test/data`,
+    // encryptionKey: 'my-super-secret-key-123!'
   });
 
   // Trabalhar com diferentes coleções
