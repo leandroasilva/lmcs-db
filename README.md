@@ -3,7 +3,6 @@
 **Lightweight Modular Collection Storage (LMCS)** — um micro SGBD baseado em arquivos locais, com suporte a coleções tipadas, filtros avançados e criptografia opcional.
 
 ![npm](https://img.shields.io/npm/v/lmcs-db)
-![license](https://img.shields.io/npm/l/lmcs-db)
 
 ---
 
@@ -18,7 +17,6 @@
 
 ---
 
-## 📦 Instalação
 
 ```bash
 npm install lmcs-db
