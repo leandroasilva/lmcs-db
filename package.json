@@ -1,0 +1,32 @@
+{
+  "name": "lmcs-db",
+  "version": "1.0.0",
+  "description": "LmcsDb is a database with multiple storage engines and criptography",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "ts-node test/demo.ts"
+  },
+  "keywords": [
+    "database",
+    "mongodb",
+    "storage",
+    "in-memory",
+    "json",
+    "binary",
+    "criptography",
+    "encryption"
+  ],
+  "author": "Leandro Aparecido da Silva<halk_lenson@hotmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  }
+}
