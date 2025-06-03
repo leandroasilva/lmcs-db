@@ -84,6 +84,8 @@ Obtém uma coleção tipada com suporte a:
 
 ### delete
 
+### count
+
 entre outros métodos utilitários
 
 📂 Estrutura esperada

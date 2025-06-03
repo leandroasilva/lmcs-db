@@ -1,6 +1,6 @@
 {
   "name": "lmcs-db",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "LmcsDb is a database with multiple storage engines and criptography",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

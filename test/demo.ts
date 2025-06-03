@@ -22,9 +22,10 @@ async function demo() {
 
   // Configuração com criptografia
   const db = await DatabaseFactory.create({
-    storageType: DatabaseStorageType.Json,
-    databaseName: 'secure-db',
-    encryptionKey: 'my-super-secret-key-123!'
+    storageType: DatabaseStorageType.Binary, //tipo de armazenamento
+    databaseName: 'secure-db', //nome do banco
+    customPath: `${process.cwd()}/test/data`, //path para armazenamento
+    encryptionKey: 'my-super-secret-key-123!' //Senha para criptografia do banco
   });
 
   // Trabalhar com diferentes coleções
@@ -46,6 +47,10 @@ async function demo() {
     category: 'Electronics'
   });
 
+  // Contar usuários no banco.
+  const userCount = await users.count();
+  console.log('User count:', userCount);
+  
   // Buscar todos os usuários ativos
   const activeUsers = await users.findAll({
     filter: { active: true }
