@@ -19,19 +19,13 @@ interface Product {
 }
 
 async function demo() {
+
   // Configuração com criptografia
   const db = await DatabaseFactory.create({
-    storageType: DatabaseStorageType.Memory,
+    storageType: DatabaseStorageType.Json,
     databaseName: 'secure-db',
-    // encryptionKey: 'my-super-secret-key-123!'
+    encryptionKey: 'my-super-secret-key-123!'
   });
-
-  // Configuração sem criptografia
-  // const db = await DatabaseFactory.create({
-  //   storageType: 'binary',
-  //   databaseName: 'standard-db'
-  // });
-
 
   // Trabalhar com diferentes coleções
   const users = db.collection<User>('users');

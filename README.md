@@ -22,10 +22,8 @@
 npm install lmcs-db
 # ou
 yarn add lmcs-db
+
 🚀 Exemplo de uso
-ts
-Copiar
-Editar
 import DatabaseFactory from 'lmcs-db';
 
 interface User {
@@ -78,6 +76,8 @@ Obtém uma coleção tipada com suporte a:
 
 ### insert
 
+### find
+
 ### findAll
 
 ### update
@@ -101,4 +101,4 @@ Para executar os testes de demonstração:
 MIT
 
 ✍️ Autor
-Desenvolvido por Leandro da Silva.
+Desenvolvido por Leandro A da Silva.
