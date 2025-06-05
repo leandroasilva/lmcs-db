@@ -1,6 +1,4 @@
-import DatabaseFactory from "../src/DatabaseFactory";
-import { DatabaseStorageType } from "../src/interfaces";
-
+import { DatabaseFactory, DatabaseStorageType } from '../src';
 
 // Definir tipos
 interface User {
