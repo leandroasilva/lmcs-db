@@ -90,7 +90,7 @@ A persistência é automática após alterações, garantindo integridade dos da
 O sistema utiliza o algoritmo AES-256-CBC com vetor de inicialização (IV) dinâmico.
 Se um banco for carregado com uma chave incorreta, ele será reiniciado como vazio, com um aviso exibido no console.
 
-O fornato binário do arquiv é ofuscado usando xorBuffer para que mesmo que não esteja usando criptografia o arquivo não legivel a humanos e tenha um desenpenho melhor para arquivos maiores.
+O fornato binário do arquivo é ofuscado usando xorBuffer para que mesmo que não esteja usando criptografia o arquivo não legivel a humanos e tenha um desenpenho melhor para arquivos maiores.
 
 ✅ Testes
 Para executar os testes de demonstração:
