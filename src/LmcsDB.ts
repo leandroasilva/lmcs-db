@@ -81,6 +81,10 @@ class LmcsDB {
     }
   }
 
+  getPersistenceStats() {
+    return this.writeWorker ? this.writeWorker.getStats() : undefined;
+  }
+
   collection<T extends DatabaseDocument>(name: string) {
     return {
       insert: async (document: Omit<T, '_id'>): Promise<T> => {

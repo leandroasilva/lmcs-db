@@ -39,6 +39,14 @@ async function demo() {
   });
 
   // Inserir produtos
+  for (let i = 0; i < 1000; i++) {
+    await products.insert({
+      name: `Product ${i}`,
+      price: 100 + i * 10,
+      category: 'Category A'
+    });
+  }
+
   const product1 = await products.insert({
     name: 'Laptop',
     price: 1200,
@@ -69,7 +77,11 @@ async function demo() {
   // Deletar um produto
   await products.delete(product1._id);
   console.log('Product deleted');
+  const t0 = Date.now();
   await db.flush();
+  const t1 = Date.now();
+  console.log('Flush duration ms:', t1 - t0);
+  console.log('Persistence stats:', (db as any).getPersistenceStats());
 }
 
 demo().catch(console.error);
