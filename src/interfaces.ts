@@ -47,6 +47,8 @@ interface DatabaseConfig {
   storageType: 'memory' | 'json' | 'binary';
   databaseName?: string;
   customPath?: string;
+  asyncPersistence?: boolean;
+  writeDebounceMs?: number;
 }
 
 enum DatabaseStorageType {

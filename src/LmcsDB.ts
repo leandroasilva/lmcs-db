@@ -10,6 +10,7 @@ class LmcsDB {
   private schema: DatabaseSchema = { collections: {} };
   private encryptionService?: EncryptionService;
   private config: DatabaseConfig;
+  private saveTimer?: NodeJS.Timeout;
 
   constructor(config: DatabaseConfig) {
     this.config = config;
@@ -57,15 +58,22 @@ class LmcsDB {
     }
   }
 
+  private scheduleSave(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+    }
+    const delay = this.config.writeDebounceMs ?? 50;
+    this.saveTimer = setTimeout(() => {
+      this.save().catch(() => {});
+      this.saveTimer = undefined;
+    }, delay);
+  }
+
   async save(): Promise<void> {
     let rawData = JSON.stringify(this.schema);
-
-    // Criptografar dados se necessário
     if (this.encryptionService) {
       rawData = this.encryptionService.encrypt(rawData);
     }
-
-    // Salvar dados
     await this.storage.save(rawData);
   }
 
@@ -84,7 +92,11 @@ class LmcsDB {
         const newDoc = { _id: id, ...document } as T;
 
         this.schema.collections[name].documents[id] = newDoc;
-        await this.save();
+        if (this.config.asyncPersistence) {
+          this.scheduleSave();
+        } else {
+          await this.save();
+        }
         return newDoc;
       },
 
@@ -162,7 +174,11 @@ class LmcsDB {
         } as T;
 
         collection.documents[id] = updatedDoc;
-        await this.save();
+        if (this.config.asyncPersistence) {
+          this.scheduleSave();
+        } else {
+          await this.save();
+        }
         return updatedDoc;
       },
 
@@ -177,7 +193,11 @@ class LmcsDB {
           delete this.schema.collections[name];
         }
 
-        await this.save();
+        if (this.config.asyncPersistence) {
+          this.scheduleSave();
+        } else {
+          await this.save();
+        }
         return true;
       },
 
