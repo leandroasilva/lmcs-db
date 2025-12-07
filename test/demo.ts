@@ -22,7 +22,7 @@ async function demo() {
   const db = await DatabaseFactory.create({
     storageType: DatabaseStorageType.Binary, //tipo de armazenamento
     databaseName: 'secure-db', //nome do banco
-    customPath: `${process.cwd()}/test/data`, //path para armazenamento
+    customPath: `${process.cwd()}/test/data/`, //path para armazenamento
     encryptionKey: 'my-super-secret-key-123!', //Senha para criptografia do banco
     asyncPersistence: true, //Persistência assíncrona
     writeDebounceMs: 100 //Debounce para persistência assíncrona em ms
