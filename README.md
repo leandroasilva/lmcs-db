@@ -11,9 +11,10 @@
 - 📦 Armazenamento em JSON ou binário  
 - 🔐 Suporte a criptografia AES opcional  
 - 🔍 Consultas com filtros e ordenação  
-- 💾 Persistência simples baseada em arquivos  
+- 💾 Persistência síncrona ou assíncrona (fila com debounce)  
 - 🧩 Coleções tipadas com suporte a `_id`  
-- 🔄 Operações CRUD com sintaxe assíncrona  
+- 🧾 Formato binário com cabeçalho, tamanho e CRC32 (container estilo SQLite)  
+- 🚀 Auto-criação de diretórios ao salvar
 
 ---
 
@@ -39,7 +40,9 @@ async function main() {
     storageType: DatabaseStorageType.Binary,
     databaseName: 'secure-db',
     customPath: `${process.cwd()}/data`,
-    encryptionKey: 'my-secret-key-123'
+    encryptionKey: 'my-secret-key-123',
+    asyncPersistence: true,
+    writeDebounceMs: 100
   });
 
   const users = db.collection<User>('users');
@@ -66,10 +69,12 @@ main();
  - DatabaseFactory.create(options): Cria uma instância do banco de dados.
 
 Parâmetros:
- - storageType: Memory, Json ou Binary para	Define o formato de armazenamento
- - databaseName:	string	Nome do arquivo base do banco
- - encryptionKey:	string (opcional)	Chave usada para criptografia AES
- - customPath: string (opcional) Path de onde será criado o arquivo de armazenamento
+ - `storageType`: `Memory` | `Json` | `Binary` — Define o formato de armazenamento
+ - `databaseName`: string — Nome do arquivo base do banco
+ - `encryptionKey`: string (opcional) — Chave usada para criptografia AES
+ - `customPath`: string (opcional) — Diretório onde será criado o arquivo de armazenamento (criado automaticamente se não existir)
+ - `asyncPersistence`: boolean (opcional) — Habilita escrita não bloqueante com fila e debounce
+ - `writeDebounceMs`: number (opcional) — Janela de debounce em milissegundos (padrão: 50)
 
 db.collection<T>(name)
 Obtém uma coleção tipada com suporte a:
@@ -83,14 +88,17 @@ Obtém uma coleção tipada com suporte a:
 entre outros métodos utilitários
 
 📂 Estrutura esperada
-Os dados são armazenados em um único arquivo .db, conforme o tipo de armazenamento escolhido.
-A persistência é automática após alterações, garantindo integridade dos dados em disco.
+Os dados são armazenados em um único arquivo `.db`, conforme o tipo de armazenamento escolhido.
+Com `asyncPersistence` ativado, as escritas são coalescidas e gravadas com debounce; chame `db.save()` para flush imediato quando necessário.
+O diretório de destino é criado automaticamente durante a gravação.
 
 🔒 Criptografia
 O sistema utiliza o algoritmo AES-256-CBC com vetor de inicialização (IV) dinâmico.
 Se um banco for carregado com uma chave incorreta, ele será reiniciado como vazio, com um aviso exibido no console.
 
-O fornato binário do arquivo é ofuscado usando xorBuffer para que mesmo que não esteja usando criptografia o arquivo não legivel a humanos e tenha um desenpenho melhor para arquivos maiores.
+Formato binário
+O arquivo `.db` usa um contêiner com cabeçalho: `LMCSDB1` (magic), `flags`, `payloadLength` e `CRC32`. O payload (JSON, possivelmente criptografado) é ofuscado com XOR.
+Na leitura, o cabeçalho e o CRC são validados; dados inválidos retornam `'{}'` de forma segura.
 
 ✅ Testes
 Para executar os testes de demonstração:
