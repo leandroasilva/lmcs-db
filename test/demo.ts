@@ -23,9 +23,7 @@ async function demo() {
     storageType: DatabaseStorageType.Binary, //tipo de armazenamento
     databaseName: 'secure-db', //nome do banco
     customPath: `${process.cwd()}/test/data/`, //path para armazenamento
-    encryptionKey: 'my-super-secret-key-123!', //Senha para criptografia do banco
-    asyncPersistence: true, //Persistência assíncrona
-    writeDebounceMs: 100 //Debounce para persistência assíncrona em ms
+    encryptionKey: 'my-super-secret-key-123!' //Senha para criptografia do banco
   });
 
   // Trabalhar com diferentes coleções
@@ -71,6 +69,7 @@ async function demo() {
   // Deletar um produto
   await products.delete(product1._id);
   console.log('Product deleted');
+  await db.flush();
 }
 
 demo().catch(console.error);

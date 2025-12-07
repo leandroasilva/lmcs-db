@@ -4,13 +4,14 @@ import InMemoryStorage from './storage/InMemoryStorage';
 import JsonStorage from './storage/JsonStorage';
 import BinaryStorage from './storage/BinaryStorage';
 import { DatabaseConfig, DatabaseDocument, DatabaseSchema, FindOptions, IDatabaseStorage } from './interfaces';
+import AsyncWriteWorker from './persistence/AsyncWriteWorker';
 
 class LmcsDB {
   private storage: IDatabaseStorage;
   private schema: DatabaseSchema = { collections: {} };
   private encryptionService?: EncryptionService;
   private config: DatabaseConfig;
-  private saveTimer?: NodeJS.Timeout;
+  private writeWorker?: AsyncWriteWorker;
 
   constructor(config: DatabaseConfig) {
     this.config = config;
@@ -34,6 +35,9 @@ class LmcsDB {
     if (config.encryptionKey) {
       this.encryptionService = new EncryptionService(config.encryptionKey);
     }
+    this.writeWorker = new AsyncWriteWorker(async (raw) => {
+      await this.storage.save(raw);
+    });
   }
 
   async initialize(): Promise<void> {
@@ -58,23 +62,23 @@ class LmcsDB {
     }
   }
 
-  private scheduleSave(): void {
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-    }
-    const delay = this.config.writeDebounceMs ?? 50;
-    this.saveTimer = setTimeout(() => {
-      this.save().catch(() => {});
-      this.saveTimer = undefined;
-    }, delay);
-  }
-
   async save(): Promise<void> {
     let rawData = JSON.stringify(this.schema);
     if (this.encryptionService) {
       rawData = this.encryptionService.encrypt(rawData);
     }
+    if (this.writeWorker) {
+      this.writeWorker.enqueue(rawData);
+      return;
+    }
     await this.storage.save(rawData);
+  }
+
+  async flush(): Promise<void> {
+    await this.save();
+    if (this.writeWorker) {
+      await this.writeWorker.flush();
+    }
   }
 
   collection<T extends DatabaseDocument>(name: string) {
@@ -92,11 +96,7 @@ class LmcsDB {
         const newDoc = { _id: id, ...document } as T;
 
         this.schema.collections[name].documents[id] = newDoc;
-        if (this.config.asyncPersistence) {
-          this.scheduleSave();
-        } else {
-          await this.save();
-        }
+        this.save().catch(() => {});
         return newDoc;
       },
 
@@ -174,11 +174,7 @@ class LmcsDB {
         } as T;
 
         collection.documents[id] = updatedDoc;
-        if (this.config.asyncPersistence) {
-          this.scheduleSave();
-        } else {
-          await this.save();
-        }
+        this.save().catch(() => {});
         return updatedDoc;
       },
 
@@ -193,11 +189,7 @@ class LmcsDB {
           delete this.schema.collections[name];
         }
 
-        if (this.config.asyncPersistence) {
-          this.scheduleSave();
-        } else {
-          await this.save();
-        }
+        this.save().catch(() => {});
         return true;
       },
 
