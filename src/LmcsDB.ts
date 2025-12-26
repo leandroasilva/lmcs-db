@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { v7 as uuidv7 } from 'uuid';
 import EncryptionService from './EncryptionService';
 import InMemoryStorage from './storage/InMemoryStorage';
 import JsonStorage from './storage/JsonStorage';
@@ -296,7 +296,7 @@ class LmcsDB {
           this.schema.collections[name] = { name, documents: {} };
         }
 
-        const id = uuidv4();
+        const id = uuidv7();
         const newDoc = { _id: id, ...document } as T;
 
         this.schema.collections[name].documents[id] = newDoc;

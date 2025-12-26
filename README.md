@@ -18,6 +18,7 @@
 - **🔐 Segurança**: Criptografia AES-256-CBC transparente (suporta dados criptografados em disco, legíveis na aplicação).
 - **⚡ Alta Performance**: Índices em memória para consultas O(1) e escritas não-bloqueantes.
 - **🔍 Consultas Poderosas**: Suporte a MongoDB-like query syntax (`$or`, `$and`, `$gt`, `$regex`, propriedades aninhadas).
+- **🆔 IDs Ordenáveis**: Utiliza UUID v7 por padrão (time-ordered) para melhor performance de indexação e ordenação natural por data de criação.
 - **TypeScript**: Tipagem estática completa para Coleções e Documentos.
 
 ---
@@ -171,7 +172,7 @@ Cria uma nova instância do banco.
 Retorna uma referência para a coleção.
 
 ### `collection.insert(doc)`
-Insere um documento. Se `_id` não for fornecido, um UUID v4 será gerado.
+Insere um documento. Se `_id` não for fornecido, um **UUID v7** (ordenável por tempo) será gerado automaticamente.
 
 ### `collection.find(options)` / `findAll(options)`
 Busca documentos. `options` inclui `filter`, `sort`, `limit`, etc.
