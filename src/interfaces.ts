@@ -2,9 +2,17 @@
 type DocumentID = string;
 type CollectionName = string;
 
+interface LogEntry {
+  op: 'i' | 'u' | 'd';
+  col: string;
+  id: string;
+  doc?: any;
+}
+
 interface IDatabaseStorage {
   save(data: string): Promise<void>;
   load(): Promise<string>;
+  append?(entry: LogEntry): Promise<void>;
 }
 
 interface DatabaseDocument {
@@ -53,7 +61,7 @@ interface FindOptions<T> {
 
 interface DatabaseConfig {
   encryptionKey?: string;
-  storageType: 'memory' | 'json' | 'binary';
+  storageType: 'memory' | 'json' | 'binary' | 'aol';
   databaseName?: string;
   customPath?: string;
 }
@@ -61,7 +69,8 @@ interface DatabaseConfig {
 enum DatabaseStorageType {
   Memory = 'memory',
   Json = 'json',
-  Binary = 'binary'
+  Binary = 'binary',
+  Aol = 'aol'
 }
 
 export {
@@ -73,5 +82,6 @@ export {
   FindOptions,
   DatabaseConfig,
   IDatabaseStorage,
-  DatabaseStorageType
+  DatabaseStorageType,
+  LogEntry
 };

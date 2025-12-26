@@ -3,7 +3,8 @@ import EncryptionService from './EncryptionService';
 import InMemoryStorage from './storage/InMemoryStorage';
 import JsonStorage from './storage/JsonStorage';
 import BinaryStorage from './storage/BinaryStorage';
-import { DatabaseConfig, DatabaseDocument, DatabaseSchema, FindOptions, IDatabaseStorage } from './interfaces';
+import AolStorage from './storage/AolStorage';
+import { DatabaseConfig, DatabaseDocument, DatabaseSchema, FindOptions, IDatabaseStorage, LogEntry } from './interfaces';
 import AsyncWriteWorker from './persistence/AsyncWriteWorker';
 
 class LmcsDB {
@@ -12,6 +13,7 @@ class LmcsDB {
   private encryptionService?: EncryptionService;
   private config: DatabaseConfig;
   private writeWorker?: AsyncWriteWorker;
+  private appendWorker?: AsyncWriteWorker;
   // collection -> field -> value -> Set<id>
   private runtimeIndices: Record<string, Record<string, Map<any, Set<string>>>> = {};
 
@@ -29,6 +31,9 @@ class LmcsDB {
       case 'binary':
         this.storage = new BinaryStorage(config.databaseName || 'default', config.customPath);
         break;
+      case 'aol':
+        this.storage = new AolStorage(config.databaseName || 'default', config.customPath);
+        break;
       default:
         throw new Error('Invalid storage type');
     }
@@ -37,6 +42,8 @@ class LmcsDB {
     if (config.encryptionKey) {
       this.encryptionService = new EncryptionService(config.encryptionKey);
     }
+
+    // Worker para Save Completo (Snapshot)
     this.writeWorker = new AsyncWriteWorker(async () => {
       let rawData = JSON.stringify(this.schema);
       if (this.encryptionService) {
@@ -44,6 +51,70 @@ class LmcsDB {
       }
       await this.storage.save(rawData);
     });
+  }
+
+  private appendQueue: LogEntry[] = [];
+  private isAppending = false;
+
+  private async processAppendQueue() {
+    if (this.isAppending) return;
+    this.isAppending = true;
+
+    while (this.appendQueue.length > 0) {
+      const entry = this.appendQueue.shift();
+      if (entry && this.storage.append) {
+        try {
+          await this.storage.append(entry);
+        } catch (error) {
+          console.error('Error appending to log:', error);
+        }
+      }
+    }
+
+    this.isAppending = false;
+  }
+  
+  private async persistOperation(entry: LogEntry) {
+    if (this.storage.append) {
+      let finalEntry = entry;
+      if (this.encryptionService && entry.doc) {
+        const docStr = JSON.stringify(entry.doc);
+        finalEntry = { ...entry, doc: this.encryptionService.encrypt(docStr) };
+      }
+
+      this.appendQueue.push(finalEntry);
+      this.processAppendQueue();
+      
+    } else {
+      await this.save();
+    }
+  }
+
+  async save(): Promise<void> {
+    if (this.writeWorker) {
+      this.writeWorker.trigger();
+      return;
+    }
+    
+    let rawData = JSON.stringify(this.schema);
+    if (this.encryptionService) {
+      rawData = this.encryptionService.encrypt(rawData);
+    }
+    await this.storage.save(rawData);
+  }
+
+  async flush(): Promise<void> {
+    if (this.storage.append) {
+        while (this.isAppending || this.appendQueue.length > 0) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        return;
+    }
+
+    await this.save();
+    if (this.writeWorker) {
+      await this.writeWorker.flush();
+    }
   }
 
   private getNestedValue(obj: any, path: string): any {
@@ -111,14 +182,47 @@ class LmcsDB {
   async initialize(): Promise<void> {
     let rawData = await this.storage.load();
 
-    // Decriptografar dados se necessário
-    if (this.encryptionService && rawData && rawData.trim() !== '' && rawData !== '{}') {
-      try {
-        rawData = this.encryptionService.decrypt(rawData);
-      } catch (error) {
-        console.error('Decryption failed. Starting with empty database.', error);
-        rawData = '{}';
-      }
+    // Se o storage retornou um JSON completo (snapshot ou load tradicional)
+    // O AolStorage.load() já retorna o JSON reconstruído do log.
+    // Mas precisamos lidar com a decriptografia SE o storage retornou dados encriptados.
+    // O AolStorage retorna JSON.stringify(schema). Se houver dados encriptados NO ARQUIVO (Full Snapshot encriptado),
+    // o load() retornaria a string encriptada?
+    // 
+    // No caso do BinaryStorage/JsonStorage:
+    // load() retorna string encriptada (se encryptionService ativo no save).
+    //
+    // No caso do AolStorage:
+    // O load() processa linha a linha. Se as linhas tiverem 'doc' encriptado, ele precisa decriptar DURANTE o load.
+    // O AolStorage não tem acesso ao EncryptionService.
+    //
+    // Solução:
+    // Precisamos passar o EncryptionService para o AolStorage ou fazer o AolStorage retornar um formato intermediário?
+    //
+    // Se passarmos a responsabilidade para o AolStorage, ferimos a arquitetura atual onde o Storage é "burro".
+    // 
+    // Alternativa: O AolStorage.load() retorna o schema onde os documentos podem estar encriptados (strings).
+    // E aqui no initialize, percorremos o schema e decriptamos se necessário.
+    
+    // Vamos ver como está o initialize atual:
+    // 1. Decripta rawData se for encriptado.
+    // 2. Parse JSON.
+    
+    // Se AolStorage retorna JSON válido (schema), ele NÃO está encriptado globalmente (como string inteira).
+    // Mas seus documentos internos podem estar.
+    
+    // Então, se config.storageType === 'aol' e encryptionKey existe:
+    // O rawData é um JSON Schema válido, mas os docs podem ser strings encriptadas.
+    
+    if (this.config.storageType !== 'aol') {
+        // Fluxo tradicional (Binary/Json/Memory)
+        if (this.encryptionService && rawData && rawData.trim() !== '' && rawData !== '{}') {
+          try {
+            rawData = this.encryptionService.decrypt(rawData);
+          } catch (error) {
+            console.error('Decryption failed. Starting with empty database.', error);
+            rawData = '{}';
+          }
+        }
     }
 
     // Parse dos dados
@@ -127,32 +231,31 @@ class LmcsDB {
       if (!this.schema.collections) {
         this.schema.collections = {};
       }
+      
+      // Pós-processamento para AOL Encriptado
+      if (this.config.storageType === 'aol' && this.encryptionService) {
+         for (const col of Object.values(this.schema.collections)) {
+            for (const [id, doc] of Object.entries(col.documents)) {
+                // Se o doc for uma string, assumimos que é encriptado
+                if (typeof doc === 'string') {
+                    try {
+                        const decryptedStr = this.encryptionService.decrypt(doc);
+                        col.documents[id] = JSON.parse(decryptedStr);
+                    } catch (e) {
+                        console.error(`Failed to decrypt document ${id} in collection ${col.name}`, e);
+                        // Mantém como está ou remove? Vamos manter para não perder dados, mas será inutilizável.
+                    }
+                }
+            }
+         }
+      }
+      
     } catch (error) {
       console.error('Failed to parse database. Starting with empty database.', error);
       this.schema = { collections: {} };
     }
 
     this.rebuildIndices();
-  }
-
-  async save(): Promise<void> {
-    if (this.writeWorker) {
-      this.writeWorker.trigger();
-      return;
-    }
-    
-    let rawData = JSON.stringify(this.schema);
-    if (this.encryptionService) {
-      rawData = this.encryptionService.encrypt(rawData);
-    }
-    await this.storage.save(rawData);
-  }
-
-  async flush(): Promise<void> {
-    await this.save();
-    if (this.writeWorker) {
-      await this.writeWorker.flush();
-    }
   }
 
   getPersistenceStats() {
@@ -198,7 +301,14 @@ class LmcsDB {
 
         this.schema.collections[name].documents[id] = newDoc;
         this.addToIndex(name, newDoc);
-        this.save().catch(() => {});
+        
+        this.persistOperation({
+          op: 'i',
+          col: name,
+          id,
+          doc: newDoc
+        }).catch(() => {});
+        
         return newDoc;
       },
 
@@ -346,7 +456,14 @@ class LmcsDB {
 
         collection.documents[id] = updatedDoc;
         this.addToIndex(name, updatedDoc);
-        this.save().catch(() => {});
+        
+        this.persistOperation({
+          op: 'u',
+          col: name,
+          id,
+          doc: updatedDoc
+        }).catch(() => {});
+        
         return updatedDoc;
       },
 
@@ -366,7 +483,12 @@ class LmcsDB {
           }
         }
 
-        this.save().catch(() => {});
+        this.persistOperation({
+          op: 'd',
+          col: name,
+          id
+        }).catch(() => {});
+        
         return true;
       },
 
