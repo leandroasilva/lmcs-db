@@ -101,6 +101,37 @@ async function runBenchmark() {
       console.log('SUCCESS: Data integrity verified after compaction.');
   }
 
+  // --- Auto-Compaction Test ---
+  console.log('\n--- Auto-Compaction Test ---');
+  const DB_AUTO_NAME = 'benchmark_auto_compact';
+  const DB_AUTO_PATH = path.join(process.cwd(), `${DB_AUTO_NAME}.aol`);
+  if (fs.existsSync(DB_AUTO_PATH)) fs.unlinkSync(DB_AUTO_PATH);
+
+  const dbAuto = new LmcsDB({
+      storageType: 'aol',
+      databaseName: DB_AUTO_NAME,
+      compactionInterval: 100 // Compact every 100ms
+  });
+  await dbAuto.initialize();
+  
+  // Insert data rapidly
+  for(let i=0; i<500; i++) {
+      const doc = await dbAuto.collection('test').insert({ i, v: 1 });
+      await dbAuto.collection('test').update(doc._id, { v: 2 }); // Double the lines
+  }
+  
+  // Wait for compaction
+  console.log('Waiting for auto-compaction...');
+  await new Promise(r => setTimeout(r, 1100)); // Wait > 1s to ensure it runs
+  
+  const sizeAuto = fs.statSync(DB_AUTO_PATH).size;
+  // 500 records * small size should be small. 
+  // If not compacted, it would have 1000 lines.
+  console.log(`Size after auto-compaction: ${sizeAuto} bytes`);
+  
+  await dbAuto.close();
+  if (fs.existsSync(DB_AUTO_PATH)) fs.unlinkSync(DB_AUTO_PATH);
+  
   // --- Encrypted AOL Storage ---
   console.log('\n--- Encrypted AOL Storage ---');
   const secretKey = 'my-secret-key-123';

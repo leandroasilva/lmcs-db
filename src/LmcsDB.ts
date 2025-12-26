@@ -16,6 +16,7 @@ class LmcsDB {
   private appendWorker?: AsyncWriteWorker;
   // collection -> field -> value -> Set<id>
   private runtimeIndices: Record<string, Record<string, Map<any, Set<string>>>> = {};
+  private compactionTimer?: NodeJS.Timeout;
 
   constructor(config: DatabaseConfig) {
     this.config = config;
@@ -41,6 +42,23 @@ class LmcsDB {
     // Configurar criptografia se a chave for fornecida
     if (config.encryptionKey) {
       this.encryptionService = new EncryptionService(config.encryptionKey);
+    }
+
+    // Configurar compactação automática se definido (Apenas AOL)
+    if (config.storageType === 'aol') {
+      // Default de 1 minuto se não definido
+      const interval = config.compactionInterval !== undefined ? config.compactionInterval : 60000;
+      
+      if (interval > 0) {
+        this.compactionTimer = setInterval(() => {
+          this.compact().catch(err => console.error('Auto-compaction failed:', err));
+        }, interval);
+        
+        // Não bloquear o processo se apenas o timer estiver rodando
+        if (this.compactionTimer.unref) {
+          this.compactionTimer.unref();
+        }
+      }
     }
 
     // Worker para Save Completo (Snapshot)
@@ -517,6 +535,13 @@ class LmcsDB {
     }
   }
 
+  async close(): Promise<void> {
+    if (this.compactionTimer) {
+        clearInterval(this.compactionTimer);
+        this.compactionTimer = undefined;
+    }
+    await this.flush();
+  }
 }
 
 export default LmcsDB;

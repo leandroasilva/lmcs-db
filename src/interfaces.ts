@@ -65,6 +65,11 @@ interface DatabaseConfig {
   storageType: 'memory' | 'json' | 'binary' | 'aol';
   databaseName?: string;
   customPath?: string;
+  /**
+   * Intervalo em milissegundos para rodar a compactação automática do log (apenas AOL).
+   * Se não definido, a compactação deve ser chamada manualmente via db.compact().
+   */
+  compactionInterval?: number;
 }
 
 enum DatabaseStorageType {

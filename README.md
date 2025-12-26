@@ -167,6 +167,7 @@ Cria uma nova instância do banco.
 - `config.databaseName`: Nome do arquivo (sem extensão).
 - `config.encryptionKey`: (Opcional) Chave para criptografia.
 - `config.customPath`: (Opcional) Diretório personalizado.
+- `config.compactionInterval`: (Opcional) Intervalo em ms para rodar compactação automática (apenas AOL). Padrão: `60000` (1 minuto).
 
 ### `db.collection<T>(name)`
 Retorna uma referência para a coleção.
