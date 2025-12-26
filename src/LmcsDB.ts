@@ -503,6 +503,20 @@ class LmcsDB {
 
     };
   }
+  async compact(): Promise<void> {
+    if (this.storage.compact) {
+      // Pause appending while compacting
+      this.isAppending = true;
+      try {
+        await this.storage.compact(this.schema, this.encryptionService);
+      } finally {
+        this.isAppending = false;
+        // Resume queue if needed
+        this.processAppendQueue();
+      }
+    }
+  }
+
 }
 
 export default LmcsDB;

@@ -186,6 +186,15 @@ Remove documentos que correspondem ao filtro.
 ### `db.flush()`
 Força a persistência de quaisquer dados pendentes em memória para o disco (útil principalmente para JSON/Binary, no AOL garante que o stream foi drenado).
 
+### `db.compact()`
+*(Disponível apenas para storage `aol`)*
+Reescreve o arquivo de log, removendo entradas redundantes (updates/deletes antigos) e mantendo apenas o estado atual. Isso reduz drasticamente o tamanho do arquivo e melhora o tempo de carregamento.
+Recomenda-se chamar periodicamente (ex: uma vez por dia ou após muitas operações de escrita).
+
+```typescript
+await db.compact();
+```
+
 ---
 
 ## 📄 Licença

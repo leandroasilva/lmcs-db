@@ -105,7 +105,68 @@ class AolStorage implements IDatabaseStorage {
     return Promise.resolve();
   }
 
-  async load(): Promise<string> {
+  async compact(schema: DatabaseSchema, encryptionService?: any): Promise<void> {
+    const tempPath = `${this.filePath}.tmp`;
+    const writeStream = fs.createWriteStream(tempPath, { flags: 'w' });
+
+    // Write a header or just start writing log entries
+    // Strategy: Write every document as an 'i' (insert) operation
+    
+    // We can iterate the schema and write to stream
+    for (const colName of Object.keys(schema.collections)) {
+        const collection = schema.collections[colName];
+        for (const docId of Object.keys(collection.documents)) {
+            let doc = collection.documents[docId];
+            
+            // Handle encryption during compaction if needed
+            // NOTE: The schema in memory has PLAIN TEXT documents (usually).
+            // LmcsDB.initialize() decrypts them.
+            // So 'doc' here is plain object.
+            
+            // If we have encryptionService, we must encrypt the doc before writing
+            // similar to how LmcsDB.persistOperation does it.
+            if (encryptionService) {
+                const docStr = JSON.stringify(doc);
+                doc = encryptionService.encrypt(docStr);
+            }
+
+            const entry: LogEntry = {
+                op: 'i',
+                col: colName,
+                id: docId,
+                doc: doc
+            };
+            
+            const line = JSON.stringify(entry) + '\n';
+            const canWrite = writeStream.write(line);
+            if (!canWrite) {
+                await new Promise(resolve => writeStream.once('drain', resolve));
+            }
+        }
+    }
+
+    return new Promise((resolve, reject) => {
+        writeStream.end(async () => {
+            try {
+                // Close current stream if open
+                if (this.writeStream) {
+                    this.writeStream.end();
+                    this.writeStream = undefined;
+                }
+                
+                // Atomic rename
+                await fs.promises.rename(tempPath, this.filePath);
+                
+                // Re-open append stream
+                this.writeStream = fs.createWriteStream(this.filePath, { flags: 'a' });
+                resolve();
+            } catch (err) {
+                reject(err);
+            }
+        });
+    });
+  }
+    async load(): Promise<string> {
     try {
       // Check if file exists
       try {

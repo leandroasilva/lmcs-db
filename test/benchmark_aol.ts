@@ -73,6 +73,34 @@ async function runBenchmark() {
       console.log('SUCCESS: Data integrity verified.');
   }
 
+  // --- AOL Compaction Test ---
+  console.log('\n--- AOL Compaction Test ---');
+  const sizeBefore = fs.statSync(DB_NAME + '.aol').size;
+  console.log(`Size before compaction: ${(sizeBefore / 1024 / 1024).toFixed(2)} MB`);
+  
+  const tCompactionStart = Date.now();
+  await dbAol.compact();
+  const tCompactionEnd = Date.now();
+  console.log(`Compaction Time: ${tCompactionEnd - tCompactionStart}ms`);
+  
+  const sizeAfter = fs.statSync(DB_NAME + '.aol').size;
+  console.log(`Size after compaction: ${(sizeAfter / 1024 / 1024).toFixed(2)} MB`);
+  
+  // Verify Data Integrity After Compaction
+  const dbAol3 = new LmcsDB({
+      storageType: 'aol',
+      databaseName: DB_NAME
+  });
+  await dbAol3.initialize();
+  const countAol3 = await dbAol3.collection('items').count();
+  console.log(`AOL Count after compaction reload: ${countAol3} (Expected: ${count})`);
+
+  if (countAol3 !== count) {
+      console.error('ERROR: Data loss detected after compaction!');
+  } else {
+      console.log('SUCCESS: Data integrity verified after compaction.');
+  }
+
   // --- Encrypted AOL Storage ---
   console.log('\n--- Encrypted AOL Storage ---');
   const secretKey = 'my-secret-key-123';

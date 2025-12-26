@@ -13,6 +13,7 @@ interface IDatabaseStorage {
   save(data: string): Promise<void>;
   load(): Promise<string>;
   append?(entry: LogEntry): Promise<void>;
+  compact?(schema: DatabaseSchema, encryptionService?: any): Promise<void>;
 }
 
 interface DatabaseDocument {
