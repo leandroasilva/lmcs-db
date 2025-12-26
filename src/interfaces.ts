@@ -57,6 +57,7 @@ interface FindOptions<T> {
     };
   };
   limit?: number;
+  skip?: number;
   sort?: { [K in keyof T]?: 1 | -1 };
 }
 

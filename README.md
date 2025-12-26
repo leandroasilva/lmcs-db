@@ -176,7 +176,23 @@ Retorna uma referência para a coleção.
 Insere um documento. Se `_id` não for fornecido, um **UUID v7** (ordenável por tempo) será gerado automaticamente.
 
 ### `collection.find(options)` / `findAll(options)`
-Busca documentos. `options` inclui `filter`, `sort`, `limit`, etc.
+Busca documentos. `options` inclui:
+- `filter`: Objeto de filtro (ex: `{ role: 'admin' }`).
+- `sort`: Ordenação (ex: `{ name: 1 }` para crescente).
+- `limit`: Limite de resultados.
+- `skip`: Número de registros para pular (útil para paginação).
+
+### `collection.findStream(options)`
+Retorna um `AsyncIterable` que entrega os documentos um a um. Ideal para processar grandes volumes de dados sem carregar tudo na memória (Streaming).
+- Suporta `filter`, `skip` e `limit`.
+- **Nota**: Se `sort` for usado, o streaming precisará carregar e ordenar os dados antes de iniciar a entrega.
+
+```typescript
+// Exemplo de Streaming
+for await (const doc of collection.findStream({ limit: 1000 })) {
+  console.log(doc);
+}
+```
 
 ### `collection.update(filter, updates)`
 Atualiza documentos que correspondem ao filtro.

@@ -197,6 +197,92 @@ class LmcsDB {
     }
   }
 
+  private getCandidates(collectionName: string, filter: any): Set<string> | null {
+    if (!filter || !this.runtimeIndices[collectionName]) return null;
+
+    let candidates: Set<string> | null = null;
+
+    for (const [key, value] of Object.entries(filter)) {
+      // Ignora operadores lógicos de topo por enquanto na otimização de índice
+      // (Poderíamos otimizar $and/$or recursivamente, mas mantendo simples como o original)
+      if (key === '$or' || key === '$and') continue;
+
+      if (this.runtimeIndices[collectionName][key]) {
+        const indexMap = this.runtimeIndices[collectionName][key];
+        let foundIds: Set<string> = new Set();
+        
+        // Direct equality: field: "value"
+        if (typeof value !== 'object') {
+          if (indexMap.has(value)) {
+            foundIds = indexMap.get(value)!;
+          }
+        } 
+        // $eq operator
+        else if (value && (value as any).$eq !== undefined) {
+           const v = (value as any).$eq;
+           if (indexMap.has(v)) {
+             foundIds = indexMap.get(v)!;
+           }
+        }
+        // $in operator
+        else if (value && (value as any).$in !== undefined) {
+           const vs = (value as any).$in as any[];
+           for (const v of vs) {
+             if (indexMap.has(v)) {
+               for (const id of indexMap.get(v)!) {
+                 foundIds.add(id);
+               }
+             }
+           }
+        } else {
+          continue; // Cannot optimize other operators with Hash Index
+        }
+
+        if (candidates === null) {
+          candidates = new Set(foundIds);
+        } else {
+          // Intersection
+          candidates = new Set([...candidates].filter((x: string) => foundIds.has(x)));
+        }
+      }
+    }
+    return candidates;
+  }
+
+  private matchesFilter(doc: any, filter: any): boolean {
+     return Object.entries(filter).every(([key, value]) => {
+        if (key === '$or') {
+          return (value as any[]).some(subFilter => this.matchesFilter(doc, subFilter));
+        }
+        if (key === '$and') {
+          return (value as any[]).every(subFilter => this.matchesFilter(doc, subFilter));
+        }
+        
+        const docValue = this.getNestedValue(doc, key);
+
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          const operators = value as Record<string, any>;
+
+          if (operators.$eq !== undefined && docValue !== operators.$eq) return false;
+          if (operators.$ne !== undefined && docValue === operators.$ne) return false;
+          if (operators.$gt !== undefined && docValue <= operators.$gt) return false;
+          if (operators.$lt !== undefined && docValue >= operators.$lt) return false;
+          if (operators.$in !== undefined && !operators.$in.includes(docValue)) return false;
+          if (operators.$nin !== undefined && operators.$nin.includes(docValue)) return false;
+          if (operators.$contains !== undefined && (typeof docValue !== 'string' || !docValue.includes(operators.$contains))) return false;
+          if (operators.$regex !== undefined && !new RegExp(operators.$regex).test(String(docValue))) return false;
+          if (operators.$exists !== undefined && (docValue !== undefined) !== operators.$exists) return false;
+          if (operators.$startsWith !== undefined && (typeof docValue !== 'string' || !docValue.startsWith(operators.$startsWith))) return false;
+          if (operators.$endsWith !== undefined && (typeof docValue !== 'string' || !docValue.endsWith(operators.$endsWith))) return false;
+          if (operators.$between !== undefined && (docValue < operators.$between[0] || docValue > operators.$between[1])) return false;
+
+          return true;
+        }
+
+        return docValue === value;
+     });
+  }
+
   async initialize(): Promise<void> {
     let rawData = await this.storage.load();
 
@@ -281,6 +367,7 @@ class LmcsDB {
   }
 
   collection<T extends DatabaseDocument>(name: string) {
+    const db = this;
     return {
       createIndex: async (field: string, options: { unique?: boolean } = {}) => {
         if (!this.schema.collections[name]) {
@@ -343,47 +430,8 @@ class LmcsDB {
         let candidates: Set<string> | null = null;
 
         // Optimization: Check if we can use indices
-        if (options?.filter && this.runtimeIndices[name]) {
-          for (const [key, value] of Object.entries(options.filter)) {
-            if (this.runtimeIndices[name][key]) {
-              const indexMap = this.runtimeIndices[name][key];
-              let foundIds: Set<string> = new Set();
-              
-              // Direct equality: field: "value"
-              if (typeof value !== 'object') {
-                if (indexMap.has(value)) {
-                  foundIds = indexMap.get(value)!;
-                }
-              } 
-              // $eq operator
-              else if (value && (value as any).$eq !== undefined) {
-                 const v = (value as any).$eq;
-                 if (indexMap.has(v)) {
-                   foundIds = indexMap.get(v)!;
-                 }
-              }
-              // $in operator
-              else if (value && (value as any).$in !== undefined) {
-                 const vs = (value as any).$in as any[];
-                 for (const v of vs) {
-                   if (indexMap.has(v)) {
-                     for (const id of indexMap.get(v)!) {
-                       foundIds.add(id);
-                     }
-                   }
-                 }
-              } else {
-                continue; // Cannot optimize other operators with Hash Index
-              }
-
-              if (candidates === null) {
-                candidates = new Set(foundIds);
-              } else {
-                // Intersection
-                candidates = new Set([...candidates].filter((x: string) => foundIds.has(x)));
-              }
-            }
-          }
+        if (options?.filter) {
+          candidates = this.getCandidates(name, options.filter);
         }
 
         let documents: T[];
@@ -400,42 +448,7 @@ class LmcsDB {
 
         // Apply filter (full check)
         if (options?.filter) {
-          documents = documents.filter(doc => {
-            const match = (currentDoc: T, filter: any): boolean => {
-               return Object.entries(filter).every(([key, value]) => {
-                  if (key === '$or') {
-                    return (value as any[]).some(subFilter => match(currentDoc, subFilter));
-                  }
-                  if (key === '$and') {
-                    return (value as any[]).every(subFilter => match(currentDoc, subFilter));
-                  }
-                  
-                  const docValue = this.getNestedValue(currentDoc, key);
-
-                  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-                    const operators = value as Record<string, any>;
-
-                    if (operators.$eq !== undefined && docValue !== operators.$eq) return false;
-                    if (operators.$ne !== undefined && docValue === operators.$ne) return false;
-                    if (operators.$gt !== undefined && docValue <= operators.$gt) return false;
-                    if (operators.$lt !== undefined && docValue >= operators.$lt) return false;
-                    if (operators.$in !== undefined && !operators.$in.includes(docValue)) return false;
-                    if (operators.$nin !== undefined && operators.$nin.includes(docValue)) return false;
-                    if (operators.$contains !== undefined && (typeof docValue !== 'string' || !docValue.includes(operators.$contains))) return false;
-                    if (operators.$regex !== undefined && !new RegExp(operators.$regex).test(String(docValue))) return false;
-                    if (operators.$exists !== undefined && (docValue !== undefined) !== operators.$exists) return false;
-                    if (operators.$startsWith !== undefined && (typeof docValue !== 'string' || !docValue.startsWith(operators.$startsWith))) return false;
-                    if (operators.$endsWith !== undefined && (typeof docValue !== 'string' || !docValue.endsWith(operators.$endsWith))) return false;
-                    if (operators.$between !== undefined && (docValue < operators.$between[0] || docValue > operators.$between[1])) return false;
-
-                    return true;
-                  }
-
-                  return docValue === value;
-               });
-            };
-            return match(doc, options.filter);
-          });
+          documents = documents.filter(doc => this.matchesFilter(doc, options.filter));
         }
 
         // Apply sorting
@@ -451,12 +464,67 @@ class LmcsDB {
           });
         }
 
-        // Apply limit
-        if (options?.limit) {
-          documents = documents.slice(0, options.limit);
+        // Apply skip and limit
+        if (options?.skip !== undefined || options?.limit !== undefined) {
+          const skip = options.skip || 0;
+          const limit = options.limit !== undefined ? options.limit : documents.length;
+          documents = documents.slice(skip, skip + limit);
         }
 
         return documents;
+      },
+
+      findStream: async function* (options?: FindOptions<T>): AsyncIterableIterator<T> {
+        const collection = db.schema.collections[name];
+        if (!collection) return;
+
+        // Se houver sort, precisamos coletar tudo, ordenar e depois fazer yield.
+        if (options?.sort) {
+           const allDocs = await db.collection<T>(name).findAll(options);
+           for (const doc of allDocs) {
+             yield doc;
+           }
+           return;
+        }
+
+        // Stream otimizado sem sort (evita alocação de array gigante)
+        const skip = options?.skip || 0;
+        const limit = options?.limit !== undefined ? options.limit : Infinity;
+        
+        let skipped = 0;
+        let yielded = 0;
+
+        let candidates: Set<string> | null = null;
+        if (options?.filter) {
+           candidates = db.getCandidates(name, options.filter);
+        }
+
+        // Se temos candidatos (via índice), iteramos sobre eles.
+        // Se não, iteramos sobre todas as chaves do objeto (evita Object.values alocando array de objetos).
+        const sourceIterator = candidates 
+            ? candidates.keys() 
+            : Object.keys(collection.documents);
+
+        for (const id of sourceIterator) {
+            const doc = collection.documents[id] as T;
+            if (!doc) continue;
+
+            if (options?.filter && !db.matchesFilter(doc, options.filter)) {
+                continue;
+            }
+
+            if (skipped < skip) {
+                skipped++;
+                continue;
+            }
+
+            if (yielded >= limit) {
+                break;
+            }
+
+            yield doc;
+            yielded++;
+        }
       },
 
       update: async (id: string, update: Partial<T>): Promise<T | null> => {
