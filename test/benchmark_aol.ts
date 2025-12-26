@@ -1,7 +1,6 @@
 import LmcsDB from '../src/LmcsDB';
 import fs from 'fs';
 import path from 'path';
-import { DatabaseStorageType } from '../src/interfaces';
 
 const DB_NAME = 'benchmark_aol';
 const DB_PATH = path.join(process.cwd(), `${DB_NAME}.aol`);
