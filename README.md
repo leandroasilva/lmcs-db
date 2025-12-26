@@ -1,161 +1,192 @@
 # lmcs-db
 
-**Lightweight Modular Collection Storage (LMCS)** — um micro SGBD baseado em arquivos locais, com suporte a coleções tipadas, filtros avançados e criptografia opcional.
+**Lightweight Modular Collection Storage (LMCS)** — Um micro SGBD local para Node.js focado em performance e simplicidade. Suporta coleções tipadas, índices em memória, criptografia forte e múltiplos motores de armazenamento, incluindo **Append-Only Log (AOL)** para máxima integridade e velocidade de escrita.
 
 ![npm](https://img.shields.io/npm/v/lmcs-db)
+![license](https://img.shields.io/npm/l/lmcs-db)
+![size](https://img.shields.io/bundlephobia/minzip/lmcs-db)
 
 ---
 
 ## ✨ Recursos
 
-- 📦 Armazenamento em JSON ou binário  
-- 🔐 Suporte a criptografia AES opcional  
-- 🔍 Consultas com filtros avançados ($or, $and, aninhados)
-- ⚡ Índices em memória para alta performance
-- 💾 Persistência assíncrona otimizada (non-blocking)
-- 🧩 Coleções tipadas com suporte a `_id`  
-- 🧾 Formato binário com cabeçalho, tamanho e CRC32 (container estilo SQLite)  
-- 🚀 Auto-criação de diretórios ao salvar
+- **Múltiplos Motores de Armazenamento**:
+  - **AOL (Append-Only Log)**: Escritas atômicas O(1), seguro contra falhas (Crash-Safe).
+  - **Binary**: Formato binário compacto com checksum CRC32.
+  - **JSON**: Legível por humanos, ideal para debug.
+  - **Memory**: Volátil, para máxima performance em testes/cache.
+- **🔐 Segurança**: Criptografia AES-256-CBC transparente (suporta dados criptografados em disco, legíveis na aplicação).
+- **⚡ Alta Performance**: Índices em memória para consultas O(1) e escritas não-bloqueantes.
+- **🔍 Consultas Poderosas**: Suporte a MongoDB-like query syntax (`$or`, `$and`, `$gt`, `$regex`, propriedades aninhadas).
+- **TypeScript**: Tipagem estática completa para Coleções e Documentos.
 
 ---
 
+## 📦 Instalação
 
 ```bash
 npm install lmcs-db
 # ou
 yarn add lmcs-db
+```
 
-🚀 Exemplo de uso
-import { DatabaseFactory, DatabaseStorageType } from 'lmcs-db';
+---
+
+## 🚀 Exemplo Rápido
+
+```typescript
+import { LmcsDB } from 'lmcs-db';
 
 interface User {
-  _id: string;
+  _id: string; // Opcional (gerado auto se omitido)
   name: string;
   email: string;
-  age: number;
-  active: boolean;
+  role: 'admin' | 'user';
 }
 
 async function main() {
-  const db = await DatabaseFactory.create({
-    storageType: DatabaseStorageType.Binary,
-    databaseName: 'secure-db',
-    customPath: `${process.cwd()}/data`,
-    encryptionKey: 'my-secret-key-123'
+  // 1. Inicializa o banco com Storage AOL (Mais seguro e rápido)
+  const db = new LmcsDB({
+    storageType: 'aol',
+    databaseName: 'my-app-db',
+    encryptionKey: 'super-secret-key-123' // Opcional: Criptografa tudo no disco
   });
 
+  await db.initialize();
+
+  // 2. Obtém uma coleção tipada
   const users = db.collection<User>('users');
 
+  // 3. Insere dados (Escrita atômica no log)
   await users.insert({
     name: 'Alice',
     email: 'alice@example.com',
-    age: 30,
-    active: true
+    role: 'admin'
   });
 
-  const activeUsers = await users.findAll({
-    filter: { active: true }
+  // 4. Consulta com filtros
+  const admins = await users.findAll({
+    filter: { role: 'admin' }
   });
 
-  console.log(activeUsers);
+  console.log(admins);
 }
 
 main();
 ```
 
-### ⚡ Performance e Índices
+---
 
-O LMCS-DB suporta índices em memória para otimizar consultas de igualdade.
+## 💾 Motores de Armazenamento (Storage Engines)
 
-```ts
-// Criar um índice para o campo 'category'
-await products.createIndex('category');
+O `lmcs-db` oferece diferentes estratégias de persistência para atender a vários casos de uso. Escolha a que melhor se adapta ao seu projeto:
 
-// Consultas filtrando por 'category' agora são O(1) (instantâneas)
-const results = await products.findAll({
-  filter: { category: 'Electronics' }
+| Tipo | Descrição | Melhor Para | Performance de Escrita | Segurança (Crash) |
+|------|-----------|-------------|------------------------|-------------------|
+| **`aol`** | **Append-Only Log**. Adiciona operações ao final do arquivo. | Produção, Logs, Alta Frequência de Escrita. | **Ultra Rápida (O(1))** | ⭐⭐⭐⭐⭐ (Máxima) |
+| **`json`** | Reescreve o arquivo JSON inteiro a cada save. | Configurações, Debug, Dados Pequenos. | Lenta (O(N)) | ⭐⭐ |
+| **`binary`** | Container binário com CRC32. Reescreve o arquivo. | Dados médios que precisam de ofuscação leve. | Lenta (O(N)) | ⭐⭐⭐ |
+| **`memory`** | Mantém tudo na RAM. Nada é salvo em disco. | Cache, Testes Unitários, Dados Temporários. | Instantânea | ⭐ (Volátil) |
+
+### Usando Append-Only Log (Recomendado)
+
+O formato AOL é o mais robusto. Em vez de reescrever todo o banco de dados a cada alteração (o que fica lento conforme o banco cresce), ele apenas anexa a nova operação (insert, update, delete) no final do arquivo.
+
+```typescript
+const db = new LmcsDB({
+  storageType: 'aol',
+  databaseName: 'events',
 });
+// As operações são persistidas instantaneamente e em ordem sequencial.
+// Em caso de queda de energia, apenas a última linha pode ser perdida,
+// mantendo a integridade de todo o resto.
 ```
 
-### 🔍 Filtros Avançados
+---
 
-Suporte para operadores lógicos e acesso a propriedades aninhadas (dot notation).
+## 🔍 Consultas e Índices
 
-```ts
-// Operadores $or e $and
+### Filtros Avançados
+O sistema de busca suporta operadores complexos e navegação em objetos aninhados (Dot Notation).
+
+```typescript
+// Buscar produtos caros OU da categoria 'Tech'
 const results = await products.findAll({
   filter: {
     $or: [
-      { category: 'Books' },
-      { price: { $gt: 100 } }
+      { category: 'Tech' },
+      { price: { $gt: 1000 } }
     ]
   }
 });
 
-// Propriedades aninhadas
+// Buscar em campos aninhados
 const users = await db.collection('users').findAll({
-  filter: { 'address.city': 'New York' }
+  filter: { 'address.city': 'São Paulo' }
 });
 ```
 
-### Encerramento
-```ts
-import { DatabaseFactory, DatabaseStorageType } from 'lmcs-db';
+### Índices para Performance
+Crie índices em campos muito consultados para tornar as buscas instantâneas.
 
-async function main() {
-  const db = await DatabaseFactory.create({
-    storageType: DatabaseStorageType.Binary,
-    databaseName: 'secure-db',
-    customPath: `${process.cwd()}/data`
-  });
+```typescript
+// Cria índice no campo 'email' (Unique opcional)
+await users.createIndex('email', { unique: true });
 
-  await db.collection('users').insert({ _id: '1', name: 'Alice' });
-
-  await db.flush();
-}
-
-main();
+// A busca agora usa Hash Map (O(1)) em vez de scan linear (O(N))
+const user = await users.findOne({ email: 'alice@example.com' });
 ```
 
-## 📘 API
- - DatabaseFactory.create(options): Cria uma instância do banco de dados.
+---
 
-Parâmetros:
- - `storageType`: `Memory` | `Json` | `Binary` — Define o formato de armazenamento
- - `databaseName`: string — Nome do arquivo base do banco
- - `encryptionKey`: string (opcional) — Chave usada para criptografia AES
- - `customPath`: string (opcional) — Diretório onde será criado o arquivo de armazenamento (criado automaticamente se não existir)
+## 🔐 Criptografia
 
-db.collection<T>(name)
-Obtém uma coleção tipada com suporte a:
-- insert
-- find
-- findAll (com suporte a índices e filtros complexos)
-- update
-- delete
-- count
-- createIndex(field, options?)
+O `lmcs-db` leva segurança a sério. Ao fornecer uma `encryptionKey`, os dados são criptografados **antes** de serem escritos no disco usando **AES-256-CBC**.
 
-entre outros métodos utilitários
+- No modo **JSON/Binary**: O arquivo inteiro é criptografado.
+- No modo **AOL**: Os documentos sensíveis são criptografados individualmente dentro do log, mantendo a estrutura do arquivo recuperável.
 
-📂 Estrutura esperada
-Os dados são armazenados em um único arquivo `.db`, conforme o tipo de armazenamento escolhido.
-As escritas são enfileiradas e processadas de forma sequencial, sem bloquear as operações do banco; chame `db.save()` para solicitar flush imediato quando necessário.
-O diretório de destino é criado automaticamente durante a gravação.
+```typescript
+const secureDb = new LmcsDB({
+  storageType: 'aol',
+  databaseName: 'secure-vault',
+  encryptionKey: process.env.DB_KEY // Nunca commite chaves no código!
+});
+```
 
-🔒 Criptografia
-O sistema utiliza o algoritmo AES-256-CBC com vetor de inicialização (IV) dinâmico.
-Se um banco for carregado com uma chave incorreta, ele será reiniciado como vazio, com um aviso exibido no console.
+> **Nota**: Se a chave estiver incorreta ao carregar, o banco não conseguirá descriptografar os dados e poderá iniciar vazio ou lançar erro, protegendo a informação.
 
-Formato binário
-O arquivo `.db` usa um contêiner com cabeçalho: `LMCSDB1` (magic), `flags`, `payloadLength` e `CRC32`. O payload (JSON, possivelmente criptografado) é ofuscado com XOR.
-Na leitura, o cabeçalho e o CRC são validados; dados inválidos retornam `'{}'` de forma segura.
+---
 
-✅ Testes
-Para executar os testes de demonstração:
+## 📘 API Reference
 
-📄 Licença
-MIT
+### `new LmcsDB(config)`
+Cria uma nova instância do banco.
+- `config.storageType`: `'aol' | 'json' | 'binary' | 'memory'`
+- `config.databaseName`: Nome do arquivo (sem extensão).
+- `config.encryptionKey`: (Opcional) Chave para criptografia.
+- `config.customPath`: (Opcional) Diretório personalizado.
 
-✍️ Autor
-Desenvolvido por Leandro A da Silva.
+### `db.collection<T>(name)`
+Retorna uma referência para a coleção.
+
+### `collection.insert(doc)`
+Insere um documento. Se `_id` não for fornecido, um UUID v4 será gerado.
+
+### `collection.find(options)` / `findAll(options)`
+Busca documentos. `options` inclui `filter`, `sort`, `limit`, etc.
+
+### `collection.update(filter, updates)`
+Atualiza documentos que correspondem ao filtro.
+
+### `collection.remove(filter)`
+Remove documentos que correspondem ao filtro.
+
+### `db.flush()`
+Força a persistência de quaisquer dados pendentes em memória para o disco (útil principalmente para JSON/Binary, no AOL garante que o stream foi drenado).
+
+---
+
+## 📄 Licença
+
+MIT © [Leandro A da Silva](https://github.com/leandroadasilva)
