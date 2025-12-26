@@ -10,8 +10,9 @@
 
 - 📦 Armazenamento em JSON ou binário  
 - 🔐 Suporte a criptografia AES opcional  
-- 🔍 Consultas com filtros e ordenação  
-- 💾 Persistência assíncrona com fila sequencial  
+- 🔍 Consultas com filtros avançados ($or, $and, aninhados)
+- ⚡ Índices em memória para alta performance
+- 💾 Persistência assíncrona otimizada (non-blocking)
 - 🧩 Coleções tipadas com suporte a `_id`  
 - 🧾 Formato binário com cabeçalho, tamanho e CRC32 (container estilo SQLite)  
 - 🚀 Auto-criação de diretórios ao salvar
@@ -62,6 +63,40 @@ async function main() {
 main();
 ```
 
+### ⚡ Performance e Índices
+
+O LMCS-DB suporta índices em memória para otimizar consultas de igualdade.
+
+```ts
+// Criar um índice para o campo 'category'
+await products.createIndex('category');
+
+// Consultas filtrando por 'category' agora são O(1) (instantâneas)
+const results = await products.findAll({
+  filter: { category: 'Electronics' }
+});
+```
+
+### 🔍 Filtros Avançados
+
+Suporte para operadores lógicos e acesso a propriedades aninhadas (dot notation).
+
+```ts
+// Operadores $or e $and
+const results = await products.findAll({
+  filter: {
+    $or: [
+      { category: 'Books' },
+      { price: { $gt: 100 } }
+    ]
+  }
+});
+
+// Propriedades aninhadas
+const users = await db.collection('users').findAll({
+  filter: { 'address.city': 'New York' }
+});
+```
 
 ### Encerramento
 ```ts
@@ -95,10 +130,11 @@ db.collection<T>(name)
 Obtém uma coleção tipada com suporte a:
 - insert
 - find
-- findAll
+- findAll (com suporte a índices e filtros complexos)
 - update
 - delete
 - count
+- createIndex(field, options?)
 
 entre outros métodos utilitários
 

@@ -1,46 +1,47 @@
-type WriteFn = (data: string) => Promise<void>;
+type TaskFn = () => Promise<void>;
 
 class AsyncWriteWorker {
   private writing = false;
-  private pendingPayload?: string;
+  private hasPending = false;
   private resolveIdle?: () => void;
-  private writeFn: WriteFn;
+  private taskFn: TaskFn;
   private enqueuedCount = 0;
   private writesCount = 0;
   private lastDurationMs = 0;
-  private lastBytes = 0;
-  private totalBytes = 0;
   private lastStartedAt?: number;
   private lastFinishedAt?: number;
 
-  constructor(writeFn: WriteFn) {
-    this.writeFn = writeFn;
+  constructor(taskFn: TaskFn) {
+    this.taskFn = taskFn;
   }
 
-  enqueue(data: string): void {
+  trigger(): void {
     this.enqueuedCount += 1;
-    this.pendingPayload = data;
+    this.hasPending = true;
     if (!this.writing) {
       this.process();
     }
   }
 
   private async process(): Promise<void> {
-    if (!this.pendingPayload) return;
+    if (!this.hasPending) return;
+    
     this.writing = true;
-    const payload = this.pendingPayload;
-    this.pendingPayload = undefined;
+    // We clear pending flag BEFORE execution. 
+    // If a new trigger comes during execution, it sets hasPending=true again, 
+    // causing a re-run after this one finishes.
+    this.hasPending = false;
+    
     try {
       this.lastStartedAt = Date.now();
-      this.lastBytes = Buffer.byteLength(payload!, 'utf-8');
-      await this.writeFn(payload!);
+      await this.taskFn();
     } finally {
       this.lastFinishedAt = Date.now();
       this.lastDurationMs = (this.lastFinishedAt - (this.lastStartedAt || this.lastFinishedAt));
       this.writesCount += 1;
-      this.totalBytes += this.lastBytes;
       this.writing = false;
-      if (this.pendingPayload) {
+      
+      if (this.hasPending) {
         setImmediate(() => this.process());
       } else if (this.resolveIdle) {
         const fn = this.resolveIdle;
@@ -51,10 +52,10 @@ class AsyncWriteWorker {
   }
 
   async flush(): Promise<void> {
-    if (this.writing || this.pendingPayload) {
+    if (this.writing || this.hasPending) {
       await new Promise<void>((resolve) => {
         this.resolveIdle = resolve;
-        if (!this.writing && this.pendingPayload) {
+        if (!this.writing && this.hasPending) {
           this.process();
         }
       });
@@ -66,10 +67,8 @@ class AsyncWriteWorker {
       enqueuedCount: this.enqueuedCount,
       writesCount: this.writesCount,
       inFlight: this.writing,
-      hasPending: !!this.pendingPayload,
+      hasPending: this.hasPending,
       lastDurationMs: this.lastDurationMs,
-      lastBytes: this.lastBytes,
-      totalBytes: this.totalBytes,
       lastStartedAt: this.lastStartedAt,
       lastFinishedAt: this.lastFinishedAt
     };

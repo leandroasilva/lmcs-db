@@ -12,9 +12,14 @@ interface DatabaseDocument {
   [key: string]: any;
 }
 
+interface IndexOptions {
+  unique?: boolean;
+}
+
 interface Collection {
   name: CollectionName;
   documents: Record<DocumentID, DatabaseDocument>;
+  indices?: Record<string, IndexOptions>;
 }
 
 interface DatabaseSchema {
@@ -23,6 +28,10 @@ interface DatabaseSchema {
 
 interface FindOptions<T> {
   filter?: {
+    $or?: Array<Partial<T> | Record<string, any>>;
+    $and?: Array<Partial<T> | Record<string, any>>;
+    [key: string]: any; 
+  } & {
     [key in keyof T]?: T[key] | {
       $eq?: T[key];
       $ne?: T[key];
