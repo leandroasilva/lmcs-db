@@ -1,6 +1,5 @@
-import { TransactionManager } from './transaction';
 import { IStorage } from '../storage/base';
-import { v4 as uuidv4 } from 'uuid';
+import { TransactionManager } from './transaction';
 
 export class TransactionContext {
   constructor(
@@ -17,7 +16,7 @@ export class TransactionContext {
     await this.txManager.addOperation(this.txId, {
       type: 'insert',
       collection,
-      id: data._id || uuidv4(),
+      id: data._id || crypto.randomUUID(),
       newData: data
     });
   }

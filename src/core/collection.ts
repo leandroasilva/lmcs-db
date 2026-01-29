@@ -1,5 +1,6 @@
-import { BaseStorage, LogEntry } from '../storage';
-import { CryptoManager } from '../crypto/manager';
+import { BaseStorage, LogEntry } from "../storage";
+import { CryptoManager } from "../crypto/manager";
+import { v7 as uuidv7 } from 'uuid';
 
 export interface QueryOptions {
   filter?: Record<string, any>;
@@ -12,17 +13,22 @@ export class Collection<T extends Record<string, any>> {
   private data = new Map<string, T>();
   private indexes = new Map<string, Map<any, Set<string>>>();
   private crypto = new CryptoManager(); // Instância sem chave para hash apenas
-  
+
   constructor(
     private name: string,
-    private storage: BaseStorage // Aceita qualquer storage
+    private storage: BaseStorage, // Aceita qualquer storage
   ) {
     this.loadFromStorage().catch(console.error);
   }
 
   private async loadFromStorage(): Promise<void> {
     try {
-      for await (const entry of this.storage.readStream()) {
+      if (!this.storage.readStream) {
+        throw new Error("Storage does not support streaming");
+      }
+
+      const stream = this.storage.readStream();
+      for await (const entry of stream) {
         this.applyLogEntry(entry);
       }
     } catch (err) {
@@ -32,12 +38,12 @@ export class Collection<T extends Record<string, any>> {
 
   private applyLogEntry(entry: LogEntry): void {
     if (entry.collection !== this.name) return;
-    
+
     const id = entry.id;
-    
+
     switch (entry.op) {
-      case 'INSERT':
-      case 'UPDATE':
+      case "INSERT":
+      case "UPDATE":
         const existing = this.data.get(id);
         if (existing) {
           this.removeFromIndexes(id, existing);
@@ -45,8 +51,8 @@ export class Collection<T extends Record<string, any>> {
         this.data.set(id, entry.data as T);
         this.addToIndexes(id, entry.data as T);
         break;
-        
-      case 'DELETE':
+
+      case "DELETE":
         const old = this.data.get(id);
         if (old) {
           this.removeFromIndexes(id, old);
@@ -75,82 +81,82 @@ export class Collection<T extends Record<string, any>> {
     }
   }
 
-  async insert(doc: Omit<T, '_id'> & { _id?: string }): Promise<T> {
-    const id = doc._id || crypto.randomUUID();
-    
+  async insert(doc: Omit<T, "_id"> & { _id?: string }): Promise<T> {
+    const id = doc._id || uuidv7();
+
     if (this.data.has(id)) {
       throw new Error(`Document with id ${id} already exists`);
     }
-    
-    const fullDoc = { ...doc, _id: id } as T;
-    
+
+    const fullDoc = { ...doc, _id: id } as unknown as T;
+
     await this.storage.append({
-      op: 'INSERT',
+      op: "INSERT",
       collection: this.name,
       id,
       data: fullDoc,
-      checksum: '',
-      timestamp: Date.now()
+      checksum: "",
+      timestamp: Date.now(),
     });
-    
+
     this.data.set(id, fullDoc);
     this.addToIndexes(id, fullDoc);
-    
+
     return fullDoc;
   }
 
   async update(filter: Partial<T>, updates: Partial<T>): Promise<number> {
     let count = 0;
-    
+
     for (const [id, doc] of this.data.entries()) {
       if (this.matchesFilter(doc, filter)) {
         const newDoc = { ...doc, ...updates, _id: id } as unknown as T;
-        
+
         await this.storage.append({
-          op: 'UPDATE',
+          op: "UPDATE",
           collection: this.name,
           id,
           data: newDoc,
-          checksum: '',
-          timestamp: Date.now()
+          checksum: "",
+          timestamp: Date.now(),
         });
-        
+
         this.removeFromIndexes(id, doc);
         this.data.set(id, newDoc);
         this.addToIndexes(id, newDoc);
         count++;
       }
     }
-    
+
     return count;
   }
 
   async delete(filter: Partial<T>): Promise<number> {
     let count = 0;
     const toDelete: string[] = [];
-    
+
     for (const [id, doc] of this.data.entries()) {
       if (this.matchesFilter(doc, filter)) {
         toDelete.push(id);
       }
     }
-    
+
     for (const id of toDelete) {
       const doc = this.data.get(id)!;
-      
+
       await this.storage.append({
-        op: 'DELETE',
+        op: "DELETE",
         collection: this.name,
         id,
-        checksum: '',
-        timestamp: Date.now()
+        checksum: "",
+        timestamp: Date.now(),
       });
-      
+
       this.removeFromIndexes(id, doc);
       this.data.delete(id);
       count++;
     }
-    
+
     return count;
   }
 
@@ -160,7 +166,7 @@ export class Collection<T extends Record<string, any>> {
     if (indexedId) {
       return this.data.get(indexedId) || null;
     }
-    
+
     for (const doc of this.data.values()) {
       if (this.matchesFilter(doc, filter)) return doc;
     }
@@ -169,11 +175,13 @@ export class Collection<T extends Record<string, any>> {
 
   async findAll(options: QueryOptions = {}): Promise<T[]> {
     let results = Array.from(this.data.values());
-    
+
     if (options.filter) {
-      results = results.filter(d => this.matchesFilter(d, options.filter!));
+      results = results.filter((d) =>
+        this.matchesFilter(d, options.filter as Partial<T>),
+      );
     }
-    
+
     if (options.sort) {
       results.sort((a, b) => {
         for (const [field, dir] of Object.entries(options.sort!)) {
@@ -185,17 +193,17 @@ export class Collection<T extends Record<string, any>> {
         return 0;
       });
     }
-    
+
     if (options.skip) results = results.slice(options.skip);
     if (options.limit) results = results.slice(0, options.limit);
-    
+
     return results;
   }
 
   createIndex(field: keyof T): void {
     if (this.indexes.has(field as string)) return;
     this.indexes.set(field as string, new Map());
-    
+
     // Indexa existentes
     for (const [id, doc] of this.data.entries()) {
       this.addToIndexes(id, doc);
@@ -212,11 +220,11 @@ export class Collection<T extends Record<string, any>> {
   private queryByIndex(filter: Partial<T>): string | null {
     const entries = Object.entries(filter);
     if (entries.length !== 1) return null;
-    
+
     const [field, value] = entries[0];
     const index = this.indexes.get(field);
     if (!index) return null;
-    
+
     const ids = index.get(value);
     if (ids && ids.size > 0) {
       return Array.from(ids)[0];

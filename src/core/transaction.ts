@@ -1,4 +1,4 @@
-import { IStorage } from '../storage/base';
+import { IStorage, LogEntry } from '../storage/base';
 import { TransactionError } from '../utils/errors';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -95,7 +95,6 @@ export class TransactionManager {
   }
 
   async recover(): Promise<void> {
-    // Recupera transações pendentes de logs anteriores e faz rollback
     const pendingTxs = new Map<string, Transaction>();
     
     for await (const entry of this.storage.readStream()) {
@@ -113,7 +112,6 @@ export class TransactionManager {
       }
     }
     
-    // Faz rollback de transações que não foram commitadas
     for (const [txId, tx] of pendingTxs) {
       console.log(`Recovering incomplete transaction ${txId}`);
       await this.rollback(txId);

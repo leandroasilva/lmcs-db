@@ -1,10 +1,10 @@
-import { BaseStorage } from './base';
-import { LogEntry } from './aol';
-import { writeFile, readFile, mkdir, access } from 'fs/promises';
-import { dirname } from 'path';
-import { createHash } from 'crypto';
-import { FileLocker } from '../utils/lock';
-import { CryptoVault } from '../crypto/vault';
+import { BaseStorage, StorageConfig } from "./base";
+import { LogEntry } from "./aol";
+import { writeFile, readFile, mkdir, access } from "fs/promises";
+import { dirname } from "path";
+import { createHash } from "crypto";
+import { FileLocker } from "../utils/lock";
+import { CryptoVault } from "../crypto/vault";
 
 interface BinaryHeader {
   magic: string;
@@ -19,14 +19,14 @@ export class BinaryStorage extends BaseStorage {
   private vault?: CryptoVault;
   private filePath: string;
   private lockPath: string;
-  private readonly MAGIC = 'LMCS';
+  private readonly MAGIC = "LMCS";
   private readonly VERSION = 1;
 
   constructor(config: StorageConfig) {
     super(config);
-    this.filePath = this.getFilePath('bin');
+    this.filePath = this.getFilePath("bin");
     this.lockPath = `${config.dbPath}/${config.dbName}.bin.lock`;
-    
+
     if (config.encryptionKey) {
       this.vault = new CryptoVault(config.encryptionKey);
     }
@@ -34,17 +34,17 @@ export class BinaryStorage extends BaseStorage {
 
   async initialize(): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    
+
     try {
       await access(this.filePath);
       const buffer = await readFile(this.filePath);
-      
+
       if (buffer.length > 0) {
         const payload = this.deserialize(buffer);
         this.data = payload;
       }
     } catch (err: any) {
-      if (err.code !== 'ENOENT') throw err;
+      if (err.code !== "ENOENT") throw err;
     }
   }
 
@@ -79,12 +79,12 @@ export class BinaryStorage extends BaseStorage {
   private serialize(entries: LogEntry[]): Buffer {
     const jsonStr = JSON.stringify(entries);
     const compressed = Buffer.from(jsonStr); // Aqui poderia usar zlib para compressão real
-    
+
     const header: BinaryHeader = {
       magic: this.MAGIC,
       version: this.VERSION,
-      checksum: createHash('crc32').update(compressed).digest('hex'),
-      encrypted: !!this.vault
+      checksum: createHash("crc32").update(compressed).digest("hex"),
+      encrypted: !!this.vault,
     };
 
     let payload = compressed;
@@ -96,7 +96,7 @@ export class BinaryStorage extends BaseStorage {
     const headerBuf = Buffer.from(JSON.stringify(header));
     const headerLen = Buffer.alloc(4);
     headerLen.writeUInt32BE(headerBuf.length);
-    
+
     const payloadLen = Buffer.alloc(4);
     payloadLen.writeUInt32BE(payload.length);
 
@@ -105,24 +105,24 @@ export class BinaryStorage extends BaseStorage {
 
   private deserialize(buffer: Buffer): LogEntry[] {
     let offset = 0;
-    
+
     const headerLen = buffer.readUInt32BE(offset);
     offset += 4;
-    
+
     const headerBuf = buffer.slice(offset, offset + headerLen);
     offset += headerLen;
-    
+
     const header: BinaryHeader = JSON.parse(headerBuf.toString());
-    
+
     if (header.magic !== this.MAGIC) {
-      throw new Error('Invalid binary file format');
+      throw new Error("Invalid binary file format");
     }
 
     const payloadLen = buffer.readUInt32BE(offset);
     offset += 4;
-    
+
     const payload = buffer.slice(offset, offset + payloadLen);
-    
+
     let jsonStr: string;
     if (header.encrypted && this.vault) {
       const decrypted = this.vault.decrypt(JSON.parse(payload.toString()));
@@ -132,11 +132,20 @@ export class BinaryStorage extends BaseStorage {
     }
 
     // Verifica checksum
-    const computedChecksum = createHash('crc32').update(Buffer.from(jsonStr)).digest('hex');
+    const computedChecksum = createHash("crc32")
+      .update(Buffer.from(jsonStr))
+      .digest("hex");
     if (computedChecksum !== header.checksum) {
-      throw new Error('Binary file corrupted (checksum mismatch)');
+      throw new Error("Binary file corrupted (checksum mismatch)");
     }
 
     return JSON.parse(jsonStr);
+  }
+
+  clear?(): Promise<void> {
+    throw new Error("Method not implemented.");
+  }
+  compact?(): Promise<void> {
+    throw new Error("Method not implemented.");
   }
 }

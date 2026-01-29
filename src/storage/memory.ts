@@ -1,4 +1,4 @@
-import { BaseStorage, LogEntry, StorageConfig } from './base';
+import { BaseStorage, LogEntry, StorageConfig } from "./base";
 
 export class MemoryStorage extends BaseStorage {
   private logs: LogEntry[] = [];
@@ -14,7 +14,7 @@ export class MemoryStorage extends BaseStorage {
   }
 
   async append(entry: LogEntry): Promise<void> {
-    if (!this.isInitialized) throw new Error('Storage not initialized');
+    if (!this.isInitialized) throw new Error("Storage not initialized");
     this.logs.push({ ...entry });
   }
 
@@ -39,5 +39,9 @@ export class MemoryStorage extends BaseStorage {
 
   getSize(): number {
     return this.logs.length;
+  }
+
+  compact?(): Promise<void> {
+    throw new Error("Method not implemented.");
   }
 }

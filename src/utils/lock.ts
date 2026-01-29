@@ -20,6 +20,7 @@ export class FileLocker {
     }
   }
 
+  // MÉTODO QUE ESTAVA FALTANDO:
   async withLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
     await this.acquire(filePath);
     try {

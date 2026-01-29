@@ -1,3 +1,14 @@
+
+export interface IStorage {
+  initialize(): Promise<void>;
+  append(entry: LogEntry): Promise<void>;
+  readStream(): AsyncGenerator<LogEntry>;
+  flush(): Promise<void>;
+  close(): Promise<void>;
+  clear?(): Promise<void>;
+  compact?(): Promise<void>;
+}
+
 export interface LogEntry {
   op: 'INSERT' | 'UPDATE' | 'DELETE' | 'BEGIN' | 'COMMIT' | 'ROLLBACK';
   collection: string;
@@ -15,7 +26,7 @@ export interface StorageConfig {
   enableChecksums?: boolean;
 }
 
-export abstract class BaseStorage {
+export abstract class BaseStorage implements IStorage {
   protected config: StorageConfig;
   
   constructor(config: StorageConfig) {
