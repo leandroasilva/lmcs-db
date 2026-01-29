@@ -1,87 +1,40 @@
-import { DatabaseFactory, DatabaseStorageType } from '../src';
+import { LmcsDB } from '../src';
 
-// Definir tipos
-interface User {
-  _id: string;
-  name: string;
-  email: string;
-  age: number;
-  active: boolean;
+async function main() {
+  // Chave passada explicitamente pelo usuário
+  const db = new LmcsDB({
+    storageType: 'aol',
+    databaseName: 'myapp',
+    encryptionKey: 'minha-chave-muito-secreta-e-longa-32bytes!',
+    enableTransactions: true,
+    compactionInterval: 300000 // 5 minutos
+  });
+
+  await db.initialize();
+
+  const users = db.collection<{ _id?: string; name: string; email: string }>('users');
+
+  // Criar índice
+  users.createIndex('email', { unique: true });
+
+  // Inserir
+  await users.insert({ name: 'Alice', email: 'alice@test.com' });
+
+  // Transação
+  await db.transaction(async (trx) => {
+    await trx.insert('users', { name: 'Bob', email: 'bob@test.com' });
+    await trx.update('users', 'some-id', { name: 'Bob Updated' });
+  });
+
+  // Buscar
+  const result = await users.findAll({
+    filter: { name: 'Alice' },
+    limit: 10
+  });
+
+  console.log(result);
+
+  await db.close();
 }
 
-interface Product {
-  _id: string;
-  name: string;
-  price: number;
-  category: string;
-}
-
-async function demo() {
-
-  // Configuração com criptografia
-  const db = await DatabaseFactory.create({
-    storageType: DatabaseStorageType.Binary, //tipo de armazenamento
-    databaseName: 'secure-db', //nome do banco
-    customPath: `${process.cwd()}/test/data/`, //path para armazenamento
-    encryptionKey: 'my-super-secret-key-123!' //Senha para criptografia do banco
-  });
-
-  // Trabalhar com diferentes coleções
-  const users = db.collection<User>('users');
-  const products = db.collection<Product>('products');
-
-  // Inserir usuários
-  const user1 = await users.insert({
-    name: 'Alice',
-    email: 'alice@example.com',
-    age: 30,
-    active: true
-  });
-
-  // Inserir produtos
-  for (let i = 0; i < 1000; i++) {
-    await products.insert({
-      name: `Product ${i}`,
-      price: 100 + i * 10,
-      category: 'Category A'
-    });
-  }
-
-  const product1 = await products.insert({
-    name: 'Laptop',
-    price: 1200,
-    category: 'Electronics'
-  });
-
-  // Contar usuários no banco.
-  const userCount = await users.count();
-  console.log('User count:', userCount);
-  
-  // Buscar todos os usuários ativos
-  const activeUsers = await users.findAll({
-    filter: { active: true }
-  });
-  console.log('Active users:', activeUsers);
-
-  // Buscar produtos caros
-  const expensiveProducts = await products.findAll({
-    filter: { price: { $gt: 1000 } },
-    sort: { price: -1 } // Ordenar por preço decrescente
-  });
-  console.log('Expensive products:', expensiveProducts);
-
-  // Atualizar um usuário
-  await users.update(user1._id, { age: 31 });
-  console.log('User updated');
-
-  // Deletar um produto
-  await products.delete(product1._id);
-  console.log('Product deleted');
-  const t0 = Date.now();
-  await db.flush();
-  const t1 = Date.now();
-  console.log('Flush duration ms:', t1 - t0);
-  console.log('Persistence stats:', (db as any).getPersistenceStats());
-}
-
-demo().catch(console.error);
+main().catch(console.error);
