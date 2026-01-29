@@ -1,13 +1,13 @@
 {
   "name": "lmcs-db",
-  "version": "1.0.4",
-  "description": "LmcsDb is a database with multiple storage engines and criptography",
+  "version": "2.0.0",
+  "description": "Lightweight Modular Collection Storage - Secure & Transactional",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
-    "test": "ts-node test/demo.ts"
+    "test": "jest"
   },
   "keywords": [
     "database",
@@ -37,11 +37,17 @@
   },
   "homepage": "https://github.com/leandroasilva/lmcs-db#readme",
   "dependencies": {
+    "proper-lockfile": "^4.1.2",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/node": "^18.0.0",
-    "ts-node": "^10.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "@types/uuid": "^9.0.8",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "tsx": "^4.21.0",
     "typescript": "^5.0.0"
   }
 }
