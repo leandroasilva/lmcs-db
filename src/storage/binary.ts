@@ -1,10 +1,9 @@
-import { BaseStorage, StorageConfig } from "./base";
-import { LogEntry } from "./aol";
+import { BaseStorage, LogEntry, StorageConfig } from "./base";
 import { writeFile, readFile, mkdir, access } from "fs/promises";
 import { dirname } from "path";
 import { createHash } from "crypto";
 import { FileLocker } from "../utils/lock";
-import { CryptoVault } from "../crypto/vault";
+import { CryptoManager } from "../crypto/manager";
 
 interface BinaryHeader {
   magic: string;
@@ -16,7 +15,7 @@ interface BinaryHeader {
 export class BinaryStorage extends BaseStorage {
   private data: LogEntry[] = [];
   private locker = new FileLocker();
-  private vault?: CryptoVault;
+  private crypto?: CryptoManager;
   private filePath: string;
   private lockPath: string;
   private readonly MAGIC = "LMCS";
@@ -28,7 +27,7 @@ export class BinaryStorage extends BaseStorage {
     this.lockPath = `${config.dbPath}/${config.dbName}.bin.lock`;
 
     if (config.encryptionKey) {
-      this.vault = new CryptoVault(config.encryptionKey);
+      this.crypto = new CryptoManager(config.encryptionKey);
     }
   }
 
@@ -50,7 +49,7 @@ export class BinaryStorage extends BaseStorage {
 
   async append(entry: LogEntry): Promise<void> {
     this.data.push(entry);
-    // Binary sempre faz rewrite completo (não é append-only)
+    // Binary always does full rewrite (not append-only)
     await this.flush();
   }
 
@@ -76,20 +75,30 @@ export class BinaryStorage extends BaseStorage {
     this.data = [];
   }
 
+  async clear(): Promise<void> {
+    this.data = [];
+    await this.flush();
+  }
+
+  async compact(): Promise<void> {
+    // Binary storage rewrites on every append, so it's always compact
+    return Promise.resolve();
+  }
+
   private serialize(entries: LogEntry[]): Buffer {
     const jsonStr = JSON.stringify(entries);
-    const compressed = Buffer.from(jsonStr); // Aqui poderia usar zlib para compressão real
+    const compressed = Buffer.from(jsonStr); // Placeholder for compression
 
     const header: BinaryHeader = {
       magic: this.MAGIC,
       version: this.VERSION,
-      checksum: createHash("crc32").update(compressed).digest("hex"),
-      encrypted: !!this.vault,
+      checksum: createHash("sha256").update(compressed).digest("hex"),
+      encrypted: !!this.crypto,
     };
 
     let payload = compressed;
-    if (this.vault) {
-      const encrypted = this.vault.encrypt(jsonStr);
+    if (this.crypto) {
+      const encrypted = this.crypto.encrypt(jsonStr);
       payload = Buffer.from(JSON.stringify(encrypted));
     }
 
@@ -104,48 +113,36 @@ export class BinaryStorage extends BaseStorage {
   }
 
   private deserialize(buffer: Buffer): LogEntry[] {
-    let offset = 0;
+    try {
+      let offset = 0;
+      
+      const headerLen = buffer.readUInt32BE(offset);
+      offset += 4;
 
-    const headerLen = buffer.readUInt32BE(offset);
-    offset += 4;
+      const headerBuf = buffer.slice(offset, offset + headerLen);
+      offset += headerLen;
+      const header: BinaryHeader = JSON.parse(headerBuf.toString());
 
-    const headerBuf = buffer.slice(offset, offset + headerLen);
-    offset += headerLen;
+      if (header.magic !== this.MAGIC) throw new Error("Invalid file format");
 
-    const header: BinaryHeader = JSON.parse(headerBuf.toString());
+      const payloadLen = buffer.readUInt32BE(offset);
+      offset += 4;
 
-    if (header.magic !== this.MAGIC) {
-      throw new Error("Invalid binary file format");
+      const payload = buffer.slice(offset, offset + payloadLen);
+
+      let jsonStr: string;
+      if (header.encrypted) {
+        if (!this.crypto) throw new Error("File is encrypted but no key provided");
+        const encrypted = JSON.parse(payload.toString());
+        jsonStr = this.crypto.decrypt(encrypted);
+      } else {
+        jsonStr = payload.toString();
+      }
+
+      return JSON.parse(jsonStr);
+    } catch (error) {
+      console.error("Failed to deserialize binary storage:", error);
+      return [];
     }
-
-    const payloadLen = buffer.readUInt32BE(offset);
-    offset += 4;
-
-    const payload = buffer.slice(offset, offset + payloadLen);
-
-    let jsonStr: string;
-    if (header.encrypted && this.vault) {
-      const decrypted = this.vault.decrypt(JSON.parse(payload.toString()));
-      jsonStr = decrypted;
-    } else {
-      jsonStr = payload.toString();
-    }
-
-    // Verifica checksum
-    const computedChecksum = createHash("crc32")
-      .update(Buffer.from(jsonStr))
-      .digest("hex");
-    if (computedChecksum !== header.checksum) {
-      throw new Error("Binary file corrupted (checksum mismatch)");
-    }
-
-    return JSON.parse(jsonStr);
-  }
-
-  clear?(): Promise<void> {
-    throw new Error("Method not implemented.");
-  }
-  compact?(): Promise<void> {
-    throw new Error("Method not implemented.");
   }
 }

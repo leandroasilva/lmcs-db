@@ -7,6 +7,7 @@ export interface QueryOptions {
   sort?: Record<string, 1 | -1>;
   limit?: number;
   skip?: number;
+  batchSize?: number;
 }
 
 export class Collection<T extends Record<string, any>> {

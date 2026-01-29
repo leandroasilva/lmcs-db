@@ -1,4 +1,4 @@
-import { Database, StorageType } from "../src";
+import { createDatabase } from "../src";
 
 interface User {
   _id?: string;
@@ -9,8 +9,8 @@ interface User {
 
 async function basicExample() {
   // 1. Create database with JSON storage (good for development)
-  const db = await Database.create({
-    storageType: StorageType.JSON,
+  const db = await createDatabase({
+    storageType: 'json',
     databaseName: 'my-app',
     customPath: './data',
     encryptionKey: 'optional-secret-key' // Remove for unencrypted

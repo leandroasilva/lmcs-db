@@ -1,4 +1,4 @@
-import { Database, StorageType } from '../src';
+import { createDatabase } from '../src';
 import { setTimeout } from 'timers/promises';
 
 interface LogEntry {
@@ -11,8 +11,8 @@ interface LogEntry {
 
 async function highPerformanceExample() {
   // AOL (Append-Only Log) is perfect for high-write scenarios
-  const db = await Database.create({
-    storageType: StorageType.AOL,
+  const db = await createDatabase({
+    storageType: 'aol',
     databaseName: 'app-logs',
     customPath: './logs',
     bufferSize: 1000, // Batch 1000 writes before fsync

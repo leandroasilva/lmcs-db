@@ -7,8 +7,7 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
-    "test": "jest",
-    "bench": "tsx benchmarks/throughput.ts"
+    "test": "jest"
   },
   "keywords": [
     "database",

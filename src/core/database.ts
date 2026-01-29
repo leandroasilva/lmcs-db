@@ -14,6 +14,7 @@ export interface DatabaseOptions {
   encryptionKey?: string;
   customPath?: string;
   compactionInterval?: number; // para AOL
+  bufferSize?: number;         // para AOL
   autosaveInterval?: number;   // para JSON
   enableChecksums?: boolean;
 }
