@@ -50,8 +50,11 @@ export class AOLStorage extends BaseStorage {
     if (!this.isInitialized) throw new Error("Storage not initialized");
 
     if (this.config.enableChecksums) {
+      const entryForChecksum = { ...entry };
+      delete (entryForChecksum as any).checksum;
+
       entry.checksum = createHash("sha256")
-        .update(JSON.stringify({ ...entry, checksum: "" }))
+        .update(JSON.stringify(entryForChecksum))
         .digest("hex");
     }
 

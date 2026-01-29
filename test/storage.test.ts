@@ -93,7 +93,7 @@ describe('Storage Engines', () => {
         entries.push(entry);
       }
 
-      expect(entries[0].data.sensitive).toBe('credit-card-1234');
+      expect((entries[0].data as any).sensitive).toBe('credit-card-1234');
     });
 
     it('should fail with wrong key', async () => {

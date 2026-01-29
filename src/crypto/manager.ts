@@ -10,6 +10,8 @@ export interface EncryptedData {
 
 export class CryptoManager {
   private masterKey?: Buffer;
+  private password?: string;
+  private _salt?: string;
   private static readonly ALGORITHM = 'aes-256-gcm';
   private static readonly ITERATIONS = 100000;
   private static readonly KEYLEN = 32;
@@ -17,10 +19,11 @@ export class CryptoManager {
 
   constructor(password?: string) {
     if (password) {
+      this.password = password;
       // Derivação inicial - salt aleatório gerado aqui
       const salt = randomBytes(32);
       this.masterKey = this.deriveKey(password, salt);
-      (this as any)._salt = salt.toString('hex'); // Guarda para referência
+      this._salt = salt.toString('hex'); // Guarda para referência
     }
   }
 
@@ -41,17 +44,29 @@ export class CryptoManager {
       data: encrypted,
       iv: iv.toString('hex'),
       tag: cipher.getAuthTag().toString('hex'),
-      salt: (this as any)._salt,
+      salt: this._salt!,
       version: CryptoManager.VERSION
     };
   }
 
   decrypt(encrypted: EncryptedData): string {
-    if (!this.masterKey) throw new Error('CryptoManager not initialized with password');
+    if (!this.masterKey && !this.password) throw new Error('CryptoManager not initialized with password');
+    
+    let key = this.masterKey;
+
+    // Se o salt do dado for diferente do atual, e temos a senha, re-derivamos a chave
+    if (encrypted.salt && this._salt && encrypted.salt !== this._salt && this.password) {
+      key = this.deriveKey(this.password, Buffer.from(encrypted.salt, 'hex'));
+    } else if (!key && this.password && encrypted.salt) {
+       // Caso onde só temos senha mas não inicializamos chave padrão (não deve ocorrer pelo construtor, mas por segurança)
+       key = this.deriveKey(this.password, Buffer.from(encrypted.salt, 'hex'));
+    }
+
+    if (!key) throw new Error('Cannot decrypt: missing key or password');
     
     const decipher = createDecipheriv(
       CryptoManager.ALGORITHM,
-      this.masterKey,
+      key,
       Buffer.from(encrypted.iv, 'hex')
     );
     

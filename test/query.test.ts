@@ -76,7 +76,7 @@ describe('Advanced Queries', () => {
   });
 
   it('should stream large datasets', async () => {
-    const stream = products.findStream({ batchSize: 2 });
+    const stream = products.findStream({});
     const items: Product[] = [];
 
     for await (const item of stream) {

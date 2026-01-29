@@ -1,9 +1,12 @@
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { mkdir, access, writeFile } from 'fs/promises';
 import { BaseStorage, MemoryStorage, JSONStorage, AOLStorage, StorageConfig } from '../storage';
 import { Collection } from './collection';
+import { TransactionManager } from './transaction';
+import { TransactionContext } from './transaction-context';
 import { FileLocker } from '../utils/lock';
 
-export type StorageType = 'memory' | 'json' | 'aol';
+export type StorageType = 'memory' | 'json' | 'aol' | 'binary';
 
 export interface DatabaseOptions {
   storageType: StorageType;
@@ -21,6 +24,8 @@ export class Database {
   private locker: FileLocker;
   private lockPath: string;
   private initialized = false;
+  private txManager?: TransactionManager;
+  private txLock: Promise<void> = Promise.resolve();
 
   constructor(private options: DatabaseOptions) {
     const basePath = options.customPath || './data';
@@ -51,13 +56,30 @@ export class Database {
 
     this.lockPath = join(basePath, `${options.databaseName}.lock`);
     this.locker = new FileLocker();
+    
+    // Enable transactions by default or if configured
+    this.txManager = new TransactionManager(this.storage);
   }
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
     
+    const lockDir = dirname(this.lockPath);
+    await mkdir(lockDir, { recursive: true });
+    
+    try {
+      await access(this.lockPath);
+    } catch {
+      await writeFile(this.lockPath, '', 'utf8');
+    }
+    
     await this.locker.acquire(this.lockPath);
     await this.storage.initialize();
+    
+    if (this.txManager) {
+      await this.txManager.recover();
+    }
+    
     this.initialized = true;
   }
 
@@ -68,6 +90,67 @@ export class Database {
       this.collections.set(name, new Collection<T>(name, this.storage));
     }
     return this.collections.get(name)!;
+  }
+
+  async transaction<T>(fn: (trx: TransactionContext) => Promise<T>): Promise<T> {
+    // Acquire lock for transaction serialization
+    let releaseLock: () => void;
+    const acquire = new Promise<void>(resolve => releaseLock = resolve);
+    const currentLock = this.txLock;
+    this.txLock = this.txLock.then(() => acquire);
+    await currentLock;
+
+    try {
+      if (!this.txManager) {
+        throw new Error('Transactions not enabled');
+      }
+      
+      const txId = await this.txManager.begin();
+      const context = new TransactionContext(
+        txId, 
+        this.txManager, 
+        this.storage,
+        async (col, id) => {
+          return this.collection(col).findOne({ _id: id });
+        }
+      );
+      
+      try {
+        const result = await fn(context);
+        const ops = await this.txManager.commit(txId);
+        
+        // Update in-memory state
+        for (const op of ops) {
+          const collection = this.collections.get(op.collection);
+          if (collection) {
+            let logOp: 'INSERT' | 'UPDATE' | 'DELETE';
+            switch (op.type) {
+              case 'insert': logOp = 'INSERT'; break;
+              case 'update': logOp = 'UPDATE'; break;
+              case 'delete': logOp = 'DELETE'; break;
+              default: continue;
+            }
+
+            collection.applyLogEntry({
+              op: logOp,
+              collection: op.collection,
+              id: op.id,
+              data: op.newData,
+              checksum: '',
+              timestamp: Date.now(),
+              txId
+            });
+          }
+        }
+        
+        return result;
+      } catch (error) {
+        await this.txManager.rollback(txId);
+        throw error;
+      }
+    } finally {
+      releaseLock!();
+    }
   }
 
   async save(): Promise<void> {

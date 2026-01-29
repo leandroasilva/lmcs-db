@@ -56,9 +56,30 @@ export class TransactionManager {
     tx.operations.push(op);
   }
 
-  async commit(txId: string): Promise<void> {
+  async commit(txId: string): Promise<Operation[]> {
     const tx = this.activeTransactions.get(txId);
     if (!tx) throw new TransactionError('Transaction not found');
+    
+    // Apply operations to storage
+    for (const op of tx.operations) {
+      let storageOp: 'INSERT' | 'UPDATE' | 'DELETE';
+      switch (op.type) {
+        case 'insert': storageOp = 'INSERT'; break;
+        case 'update': storageOp = 'UPDATE'; break;
+        case 'delete': storageOp = 'DELETE'; break;
+        default: continue;
+      }
+
+      await this.storage.append({
+        op: storageOp,
+        collection: op.collection,
+        id: op.id,
+        data: op.newData || {},
+        checksum: '',
+        timestamp: Date.now(),
+        txId: txId
+      });
+    }
     
     await this.storage.append({
       op: 'COMMIT',
@@ -69,8 +90,11 @@ export class TransactionManager {
       txId
     });
     
+    const operations = [...tx.operations];
     tx.status = 'committed';
     this.activeTransactions.delete(txId);
+
+    return operations;
   }
 
   async rollback(txId: string): Promise<void> {

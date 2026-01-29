@@ -36,7 +36,7 @@ export class Collection<T extends Record<string, any>> {
     }
   }
 
-  private applyLogEntry(entry: LogEntry): void {
+  applyLogEntry(entry: LogEntry): void {
     if (entry.collection !== this.name) return;
 
     const id = entry.id;
@@ -200,6 +200,31 @@ export class Collection<T extends Record<string, any>> {
     return results;
   }
 
+  async *findStream(options: QueryOptions = {}): AsyncGenerator<T> {
+    if (options.sort) {
+      const all = await this.findAll(options);
+      for (const doc of all) yield doc;
+      return;
+    }
+
+    let count = 0;
+    let skipped = 0;
+
+    for (const doc of this.data.values()) {
+      if (options.filter && !this.matchesFilter(doc, options.filter as Partial<T>)) continue;
+
+      if (options.skip && skipped < options.skip) {
+        skipped++;
+        continue;
+      }
+
+      if (options.limit && count >= options.limit) break;
+
+      yield doc;
+      count++;
+    }
+  }
+
   createIndex(field: keyof T): void {
     if (this.indexes.has(field as string)) return;
     this.indexes.set(field as string, new Map());
@@ -210,11 +235,63 @@ export class Collection<T extends Record<string, any>> {
     }
   }
 
-  private matchesFilter(doc: T, filter: Partial<T>): boolean {
+  private matchesFilter(doc: T, filter: any): boolean {
     for (const [key, value] of Object.entries(filter)) {
-      if ((doc as any)[key] !== value) return false;
+      if (key === "$or") {
+        if (!Array.isArray(value)) return false;
+        if (!value.some((condition) => this.matchesFilter(doc, condition))) return false;
+        continue;
+      }
+
+      if (key === "$and") {
+        if (!Array.isArray(value)) return false;
+        if (!value.every((condition) => this.matchesFilter(doc, condition))) return false;
+        continue;
+      }
+
+      // Handle dot notation for nested fields
+      const docValue = this.getNestedValue(doc, key);
+
+      if (typeof value === "object" && value !== null) {
+        // Handle operators like $gt, $lt, etc.
+        for (const [op, opValue] of Object.entries(value)) {
+          switch (op) {
+            case "$gt":
+              if (!(docValue > opValue)) return false;
+              break;
+            case "$gte":
+              if (!(docValue >= opValue)) return false;
+              break;
+            case "$lt":
+              if (!(docValue < opValue)) return false;
+              break;
+            case "$lte":
+              if (!(docValue <= opValue)) return false;
+              break;
+            case "$ne":
+              if (docValue === opValue) return false;
+              break;
+            case "$in":
+              if (!Array.isArray(opValue) || !opValue.includes(docValue)) return false;
+              break;
+            case "$nin":
+              if (Array.isArray(opValue) && opValue.includes(docValue)) return false;
+              break;
+            default:
+              // If it's not an operator, treat as equality check for object
+              if (JSON.stringify(docValue) !== JSON.stringify(value)) return false;
+          }
+        }
+      } else {
+        // Direct equality
+        if (docValue !== value) return false;
+      }
     }
     return true;
+  }
+
+  private getNestedValue(obj: any, path: string): any {
+    return path.split('.').reduce((o, p) => (o ? o[p] : undefined), obj);
   }
 
   private queryByIndex(filter: Partial<T>): string | null {

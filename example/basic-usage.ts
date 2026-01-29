@@ -1,4 +1,4 @@
-import { Database, StorageType } from '../src';
+import { Database, StorageType } from "../src";
 
 interface User {
   _id?: string;
