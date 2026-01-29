@@ -4,3 +4,6 @@ dist
 yarn.lock
 *.map
 *.js
+data/*
+logs/*
+benchmark-data/*

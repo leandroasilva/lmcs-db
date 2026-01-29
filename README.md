@@ -1,219 +1,281 @@
-# lmcs-db
+# LMCS-DB v2.0
 
-**Lightweight Modular Collection Storage (LMCS)** — Um micro SGBD local para Node.js focado em performance e simplicidade. Suporta coleções tipadas, índices em memória, criptografia forte e múltiplos motores de armazenamento, incluindo **Append-Only Log (AOL)** para máxima integridade e velocidade de escrita.
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://typescriptlang.org)
+[![Node](https://img.shields.io/badge/Node-18+-green.svg)](https://nodejs.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![npm](https://img.shields.io/npm/v/lmcs-db)
-![license](https://img.shields.io/npm/l/lmcs-db)
-![size](https://img.shields.io/bundlephobia/minzip/lmcs-db)
+**Lightweight Modular Collection Storage** — A high-performance, file-based NoSQL database for Node.js with multiple storage engines, ACID transactions, and military-grade encryption.
 
----
+## ✨ Features
 
-## ✨ Recursos
+- **🗄️ Multiple Storage Engines**: Memory, JSON, Binary, and Append-Only Log (AOL)
+- **🔐 Built-in Encryption**: AES-256-GCM with PBKDF2 key derivation
+- **🔄 ACID Transactions**: Multi-document transactions with rollback support
+- **⚡ High Performance**: In-memory indexes, streaming queries, and batch operations
+- **🔍 Advanced Queries**: MongoDB-like operators ($gt, $lt, $or, $and, $in)
+- **📦 Zero Dependencies**: Lightweight with minimal footprint
+- **🧪 Full TypeScript**: Type-safe collections with IntelliSense support
 
-- **Múltiplos Motores de Armazenamento**:
-  - **AOL (Append-Only Log)**: Escritas atômicas O(1), seguro contra falhas (Crash-Safe).
-  - **Binary**: Formato binário compacto com checksum CRC32.
-  - **JSON**: Legível por humanos, ideal para debug.
-  - **Memory**: Volátil, para máxima performance em testes/cache.
-- **🔐 Segurança**: Criptografia AES-256-CBC transparente (suporta dados criptografados em disco, legíveis na aplicação).
-- **⚡ Alta Performance**: Índices em memória para consultas O(1) e escritas não-bloqueantes.
-- **🔍 Consultas Poderosas**: Suporte a MongoDB-like query syntax (`$or`, `$and`, `$gt`, `$regex`, propriedades aninhadas).
-- **🆔 IDs Ordenáveis**: Utiliza UUID v7 por padrão (time-ordered) para melhor performance de indexação e ordenação natural por data de criação.
-- **TypeScript**: Tipagem estática completa para Coleções e Documentos.
-
----
-
-## 📦 Instalação
+## 🚀 Quick Start
 
 ```bash
 npm install lmcs-db
-# ou
-yarn add lmcs-db
 ```
 
----
-
-## 🚀 Exemplo Rápido
-
 ```typescript
-import { LmcsDB } from 'lmcs-db';
+import { Database, StorageType } from "lmcs-db";
 
 interface User {
-  _id: string; // Opcional (gerado auto se omitido)
+  _id?: string;
   name: string;
   email: string;
-  role: 'admin' | 'user';
+  age: number;
 }
 
-async function main() {
-  // 1. Inicializa o banco com Storage AOL (Mais seguro e rápido)
-  const db = new LmcsDB({
-    storageType: 'aol',
-    databaseName: 'my-app-db',
-    encryptionKey: 'super-secret-key-123' // Opcional: Criptografa tudo no disco
-  });
-
-  await db.initialize();
-
-  // 2. Obtém uma coleção tipada
-  const users = db.collection<User>('users');
-
-  // 3. Insere dados (Escrita atômica no log)
-  await users.insert({
-    name: 'Alice',
-    email: 'alice@example.com',
-    role: 'admin'
-  });
-
-  // 4. Consulta com filtros
-  const admins = await users.findAll({
-    filter: { role: 'admin' }
-  });
-
-  console.log(admins);
-}
-
-main();
-```
-
----
-
-## 💾 Motores de Armazenamento (Storage Engines)
-
-O `lmcs-db` oferece diferentes estratégias de persistência para atender a vários casos de uso. Escolha a que melhor se adapta ao seu projeto:
-
-| Tipo | Descrição | Melhor Para | Performance de Escrita | Segurança (Crash) |
-|------|-----------|-------------|------------------------|-------------------|
-| **`aol`** | **Append-Only Log**. Adiciona operações ao final do arquivo. | Produção, Logs, Alta Frequência de Escrita. | **Ultra Rápida (O(1))** | ⭐⭐⭐⭐⭐ (Máxima) |
-| **`json`** | Reescreve o arquivo JSON inteiro a cada save. | Configurações, Debug, Dados Pequenos. | Lenta (O(N)) | ⭐⭐ |
-| **`binary`** | Container binário com CRC32. Reescreve o arquivo. | Dados médios que precisam de ofuscação leve. | Lenta (O(N)) | ⭐⭐⭐ |
-| **`memory`** | Mantém tudo na RAM. Nada é salvo em disco. | Cache, Testes Unitários, Dados Temporários. | Instantânea | ⭐ (Volátil) |
-
-### Usando Append-Only Log (Recomendado)
-
-O formato AOL é o mais robusto. Em vez de reescrever todo o banco de dados a cada alteração (o que fica lento conforme o banco cresce), ele apenas anexa a nova operação (insert, update, delete) no final do arquivo.
-
-```typescript
-const db = new LmcsDB({
-  storageType: 'aol',
-  databaseName: 'events',
+// Create database
+const db = await Database.create({
+  storageType: StorageType.Binary,
+  databaseName: "myapp",
+  encryptionKey: "your-secret-key-32-chars!!", // Optional
 });
-// As operações são persistidas instantaneamente e em ordem sequencial.
-// Em caso de queda de energia, apenas a última linha pode ser perdida,
-// mantendo a integridade de todo o resto.
+
+const users = db.collection<User>("users");
+
+// Insert
+await users.insert({ name: "Alice", email: "alice@test.com", age: 30 });
+
+// Query
+const adults = await users.findAll({
+  filter: { age: { $gte: 18 } },
+  sort: { name: 1 },
+  limit: 10,
+});
+
+// Transaction
+await db.transaction(async (trx) => {
+  await trx.insert("users", { name: "Bob", age: 25 });
+  await trx.update("users", "alice-id", { age: 31 });
+});
 ```
 
----
+💾 Storage Engines
+| Engine | Persistence | Speed | Use Case | Compression |
+| ---------- | ----------- | ------------- | ------------------------------------- | -------------- |
+| **Memory** | ❌ Volatile | ⚡ Ultra-fast | Cache, testing, temporary data | N/A |
+| **JSON** | ✅ File | 🐢 Moderate | Config files, small datasets (<10MB) | None (text) |
+| **Binary** | ✅ File | 🚀 Fast | General purpose, medium datasets | Binary packing |
+| **AOL** | ✅ File | ⚡ Fast writes | Logs, event sourcing, high throughput | Compaction |
 
-## 🔍 Consultas e Índices
+Engine Details
 
-### Filtros Avançados
-O sistema de busca suporta operadores complexos e navegação em objetos aninhados (Dot Notation).
+Memory Storage
 
 ```typescript
-// Buscar produtos caros OU da categoria 'Tech'
-const results = await products.findAll({
+const db = await createDatabase({
+  storageType: "memory",
+  databaseName: "cache",
+});
+// Data lost on process exit. Fastest option.
+```
+
+JSON Storage
+
+```typescript
+const db = await createDatabase({
+  storageType: "json",
+  databaseName: "config",
+});
+// Human-readable, but slower than binary.
+```
+
+Binary Storage
+
+```typescript
+const db = await createDatabase({
+  storageType: "binary",
+  databaseName: "data",
+  encryptionKey: "secret", // Optional encryption
+});
+// Compact binary format with CRC32 checksums
+```
+
+AOL (Append-Only Log)
+
+```typescript
+const db = await Database.create({
+  storageType: StorageType.AOL,
+  databaseName: "events",
+  bufferSize: 1000, // Buffer before fsync
+  compactionInterval: 60000, // Automatic cleanup every 60s
+});
+// O(1) writes, perfect for event sourcing
+```
+
+🔍 Query API
+
+Basic Queries
+
+```typescript
+// Find one
+const user = await users.findOne({ email: "alice@test.com" });
+
+// Find all
+const all = await users.findAll();
+
+// Count
+const total = await users.count();
+```
+
+Advanced Filtering
+
+```typescript
+// Comparison operators
+const adults = await users.findAll({ filter: { age: { $gte: 18 } } });
+const rich = await users.findAll({ filter: { salary: { $gt: 100000 } } });
+
+// Logical operators
+const result = await users.findAll({
   filter: {
-    $or: [
-      { category: 'Tech' },
-      { price: { $gt: 1000 } }
-    ]
+    $or: [{ age: { $lt: 18 } }, { vip: true }],
+  },
+});
+
+// Array operators (if field is array)
+const tagged = await posts.findAll({
+  filter: { tags: { $in: ["typescript", "nodejs"] } },
+});
+```
+
+Sorting and Pagination
+
+```typescript
+const page = await users.findAll({
+  filter: { active: true },
+  sort: { createdAt: -1 }, // -1 = descending, 1 = ascending
+  skip: 20, // Offset
+  limit: 10, // Page size
+});
+```
+
+Streaming (Memory Efficient)
+
+```typescript
+// Process millions of records without loading into memory
+const stream = logs.findStream({ filter: { level: "error" } });
+
+for await (const error of stream) {
+  await sendAlert(error);
+}
+```
+
+🔄 Transactions
+ACID transactions ensure data consistency across multiple operations:
+
+```typescript
+await db.transaction(async (trx) => {
+  // All operations succeed or all rollback
+  const order = await trx.insert("orders", { total: 100, status: "pending" });
+  await trx.insert("order_items", { orderId: order._id, product: "Laptop" });
+  await trx.update("inventory", "laptop-123", { stock: { $dec: 1 } });
+
+  if (somethingWrong) {
+    throw new Error("Rollback everything");
   }
 });
+```
 
-// Buscar em campos aninhados
-const users = await db.collection('users').findAll({
-  filter: { 'address.city': 'São Paulo' }
+🔐 Security
+Encryption
+Algorithm: AES-256-GCM
+Key Derivation: PBKDF2 with 100,000 iterations
+Unique IV per encryption operation
+Authentication tag prevents tampering
+
+```typescript
+const db = await Database.create({
+  storageType: StorageType.Binary,
+  databaseName: "secrets",
+  encryptionKey: process.env.DB_KEY, // Load from secure source
 });
+
+// All data transparently encrypted on disk
+await secrets.insert({ password: "super-secret" });
 ```
 
-### Índices para Performance
-Crie índices em campos muito consultados para tornar as buscas instantâneas.
+Indexing
+Create indexes for fast queries:
 
 ```typescript
-// Cria índice no campo 'email' (Unique opcional)
-await users.createIndex('email', { unique: true });
+// Single field
+users.createIndex("email", { unique: true });
 
-// A busca agora usa Hash Map (O(1)) em vez de scan linear (O(N))
-const user = await users.findOne({ email: 'alice@example.com' });
+// Compound
+orders.createIndex(["userId", "createdAt"]);
+
+// Sparse (skip null values)
+users.createIndex("phone", { sparse: true });
 ```
-
----
-
-## 🔐 Criptografia
-
-O `lmcs-db` leva segurança a sério. Ao fornecer uma `encryptionKey`, os dados são criptografados **antes** de serem escritos no disco usando **AES-256-CBC**.
-
-- No modo **JSON/Binary**: O arquivo inteiro é criptografado.
-- No modo **AOL**: Os documentos sensíveis são criptografados individualmente dentro do log, mantendo a estrutura do arquivo recuperável.
+📊 Performance Tips
+1. Use Memory storage for unit tests (10x faster)
+2. Batch inserts instead of individual awaits
+3. Create indexes on frequently queried fields
+4. Use streaming for large datasets (>10k records)
+5. Compact AOL periodically to reclaim space
+6. Enable checksums for critical data integrity
 
 ```typescript
-const secureDb = new LmcsDB({
-  storageType: 'aol',
-  databaseName: 'secure-vault',
-  encryptionKey: process.env.DB_KEY // Nunca commite chaves no código!
-});
-```
+// Batch insert (much faster)
+await Promise.all(
+  items.map(item => collection.insert(item))
+);
 
-> **Nota**: Se a chave estiver incorreta ao carregar, o banco não conseguirá descriptografar os dados e poderá iniciar vazio ou lançar erro, protegendo a informação.
-
----
-
-## 📘 API Reference
-
-### `new LmcsDB(config)`
-Cria uma nova instância do banco.
-- `config.storageType`: `'aol' | 'json' | 'binary' | 'memory'`
-- `config.databaseName`: Nome do arquivo (sem extensão).
-- `config.encryptionKey`: (Opcional) Chave para criptografia.
-- `config.customPath`: (Opcional) Diretório personalizado.
-- `config.compactionInterval`: (Opcional) Intervalo em ms para rodar compactação automática (apenas AOL). Padrão: `60000` (1 minuto).
-
-### `db.collection<T>(name)`
-Retorna uma referência para a coleção.
-
-### `collection.insert(doc)`
-Insere um documento. Se `_id` não for fornecido, um **UUID v7** (ordenável por tempo) será gerado automaticamente.
-
-### `collection.find(options)` / `findAll(options)`
-Busca documentos. `options` inclui:
-- `filter`: Objeto de filtro (ex: `{ role: 'admin' }`).
-- `sort`: Ordenação (ex: `{ name: 1 }` para crescente).
-- `limit`: Limite de resultados.
-- `skip`: Número de registros para pular (útil para paginação).
-
-### `collection.findStream(options)`
-Retorna um `AsyncIterable` que entrega os documentos um a um. Ideal para processar grandes volumes de dados sem carregar tudo na memória (Streaming).
-- Suporta `filter`, `skip` e `limit`.
-- **Nota**: Se `sort` for usado, o streaming precisará carregar e ordenar os dados antes de iniciar a entrega.
-
-```typescript
-// Exemplo de Streaming
-for await (const doc of collection.findStream({ limit: 1000 })) {
-  console.log(doc);
-}
-```
-
-### `collection.update(filter, updates)`
-Atualiza documentos que correspondem ao filtro.
-
-### `collection.remove(filter)`
-Remove documentos que correspondem ao filtro.
-
-### `db.flush()`
-Força a persistência de quaisquer dados pendentes em memória para o disco (útil principalmente para JSON/Binary, no AOL garante que o stream foi drenado).
-
-### `db.compact()`
-*(Disponível apenas para storage `aol`)*
-Reescreve o arquivo de log, removendo entradas redundantes (updates/deletes antigos) e mantendo apenas o estado atual. Isso reduz drasticamente o tamanho do arquivo e melhora o tempo de carregamento.
-Recomenda-se chamar periodicamente (ex: uma vez por dia ou após muitas operações de escrita).
-
-```typescript
+// Compact AOL storage
 await db.compact();
 ```
 
----
+🧪 Testing
+```bash
+# Run all tests
+npm test
 
-## 📄 Licença
+# Run specific suite
+npm test -- storage.test.ts
 
-MIT © [Leandro A da Silva](https://github.com/leandroadasilva)
+# With coverage
+npm run test:coverage
+```
+
+📁 Project Structure
+```bash
+data/
+├── myapp.bin        # Binary storage file
+├── myapp.json       # JSON storage file
+└── myapp.aol        # Append-only log
+
+src/
+├── core/
+│   ├── database.ts      # Main database class
+│   ├── collection.ts    # Collection operations
+│   ├── transaction.ts   # ACID transactions
+│   └── indexer.ts       # Index management
+├── storage/
+│   ├── base.ts          # Storage interface
+│   ├── memory.ts        # In-memory storage
+│   ├── json.ts          # JSON file storage
+│   ├── binary.ts        # Binary storage
+│   └── aol.ts           # Append-only log
+└── crypto/
+    └── manager.ts       # Encryption utilities
+```
+
+🤝 Contributing
+1. Fork the repository
+2. Create your feature branch (git checkout -b feature/amazing)
+3. Commit changes (git commit -m 'Add amazing feature')
+4. Push to branch (git push origin feature/amazing)
+5. Open a Pull Request
+
+📄 License
+[MIT License](LICENSE) - see [LICENSE](LICENSE) file.
+
+Made with ❤️ by Leandro A. da Silva
