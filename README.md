@@ -71,8 +71,8 @@ Engine Details
 Memory Storage
 
 ```typescript
-const db = await Database.create({
-  storageType: StorageType.Memory,
+const db = await createDatabase({
+  storageType: "memory",
   databaseName: "cache",
 });
 // Data lost on process exit. Fastest option.
@@ -81,8 +81,8 @@ const db = await Database.create({
 JSON Storage
 
 ```typescript
-const db = await Database.create({
-  storageType: StorageType.JSON,
+const db = await createDatabase({
+  storageType: "json",
   databaseName: "config",
 });
 // Human-readable, but slower than binary.
@@ -91,8 +91,8 @@ const db = await Database.create({
 Binary Storage
 
 ```typescript
-const db = await Database.create({
-  storageType: StorageType.Binary,
+const db = await createDatabase({
+  storageType: "binary",
   databaseName: "data",
   encryptionKey: "secret", // Optional encryption
 });

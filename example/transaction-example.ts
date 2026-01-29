@@ -1,4 +1,4 @@
-import { Database, StorageType } from '../src';
+import { createDatabase } from '../src';
 
 interface Account {
   _id?: string;
@@ -8,8 +8,8 @@ interface Account {
 }
 
 async function transferExample() {
-  const db = await Database.create({
-    storageType: StorageType.Binary, // Fast and compact
+  const db = await createDatabase({
+    storageType: 'binary', // Fast and compact
     databaseName: 'bank',
     encryptionKey: 'bank-secret-32-chars-long!!!',
     enableChecksums: true

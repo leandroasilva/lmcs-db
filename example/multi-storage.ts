@@ -1,10 +1,10 @@
-import { Database, StorageType } from '../src';
+import { createDatabase, StorageType } from '../src';
 
 async function benchmarkStorage(type: StorageType, name: string) {
   console.log(`\n=== Benchmarking ${name} ===`);
   
   const start = Date.now();
-  const db = await Database.create({
+  const db = await createDatabase({
     storageType: type,
     databaseName: `bench-${type}`,
     customPath: './benchmark-data'
@@ -29,7 +29,7 @@ async function benchmarkStorage(type: StorageType, name: string) {
 
   // File size info (for file-based storages)
   const fs = await import('fs/promises');
-  const path = `./benchmark-data/bench-${type}.${type === StorageType.JSON ? 'json' : type === StorageType.Binary ? 'bin' : 'aol'}`;
+  const path = `./benchmark-data/bench-${type}.${type === 'json' ? 'json' : type === 'binary' ? 'bin' : 'aol'}`;
   
   try {
     const stats = await fs.stat(path);
@@ -43,10 +43,10 @@ async function benchmarkStorage(type: StorageType, name: string) {
 }
 
 async function compareStorages() {
-  await benchmarkStorage(StorageType.Memory, 'Memory (Volatile)');
-  await benchmarkStorage(StorageType.JSON, 'JSON (Human Readable)');
-  await benchmarkStorage(StorageType.Binary, 'Binary (Compact)');
-  await benchmarkStorage(StorageType.AOL, 'AOL (Append-Only)');
+  await benchmarkStorage('memory', 'Memory (Volatile)');
+  await benchmarkStorage('json', 'JSON (Human Readable)');
+  await benchmarkStorage('binary', 'Binary (Compact)');
+  await benchmarkStorage('aol', 'AOL (Append-Only)');
 
   console.log('\n=== Recommendations ===');
   console.log('• Memory: Use for caching, tests, or temporary data');

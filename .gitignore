@@ -6,3 +6,4 @@ yarn.lock
 *.js
 data/*
 logs/*
+benchmark-data/*

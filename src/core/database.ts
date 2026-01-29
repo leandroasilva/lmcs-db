@@ -1,6 +1,6 @@
 import { join, dirname } from 'path';
 import { mkdir, access, writeFile } from 'fs/promises';
-import { BaseStorage, MemoryStorage, JSONStorage, AOLStorage, StorageConfig } from '../storage';
+import { BaseStorage, MemoryStorage, JSONStorage, AOLStorage, BinaryStorage, StorageConfig } from '../storage';
 import { Collection } from './collection';
 import { TransactionManager } from './transaction';
 import { TransactionContext } from './transaction-context';
@@ -48,8 +48,12 @@ export class Database {
       case 'aol':
         this.storage = new AOLStorage({
           ...config,
-          compactionInterval: options.compactionInterval
+          compactionInterval: options.compactionInterval,
+          bufferSize: options.bufferSize
         });
+        break;
+      case 'binary':
+        this.storage = new BinaryStorage(config);
         break;
       default:
         throw new Error(`Unknown storage type: ${options.storageType}`);
