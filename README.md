@@ -276,6 +276,6 @@ src/
 5. Open a Pull Request
 
 📄 License
-MIT License - see LICENSE file.
+[MIT License](LICENSE) - see [LICENSE](LICENSE) file.
 
 Made with ❤️ by Leandro A. da Silva

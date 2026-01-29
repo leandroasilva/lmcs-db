@@ -42,9 +42,13 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@types/proper-lockfile": "^4.1.4",
     "@types/uuid": "^9.0.8",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "tsx": "^4.21.0",
     "typescript": "^5.0.0"
   }
 }
