@@ -1,92 +1,125 @@
-import { BaseStorage } from './base';
-import { LogEntry } from './aol';
+import { BaseStorage, LogEntry, StorageConfig } from './base';
+import { CryptoManager } from '../crypto/manager';
 import { writeFile, readFile, mkdir, access } from 'fs/promises';
 import { dirname } from 'path';
 import { FileLocker } from '../utils/lock';
-import { CryptoVault } from '../crypto/vault';
 
 export class JSONStorage extends BaseStorage {
-  private data: LogEntry[] = [];
+  private cache: LogEntry[] = [];
+  private crypto?: CryptoManager;
   private locker = new FileLocker();
-  private vault?: CryptoVault;
   private dirty = false;
-  private autosaveInterval?: NodeJS.Timeout;
-  private filePath: string;
-  private lockPath: string;
+  private autosaveTimer?: NodeJS.Timeout;
+  private isInitialized = false;
 
-  constructor(config: StorageConfig, private autosaveMs: number = 5000) {
+  constructor(config: StorageConfig, private autosaveInterval = 5000) {
     super(config);
-    this.filePath = this.getFilePath('json');
-    this.lockPath = `${config.dbPath}/${config.dbName}.json.lock`;
-    
     if (config.encryptionKey) {
-      this.vault = new CryptoVault(config.encryptionKey);
+      this.crypto = new CryptoManager(config.encryptionKey);
     }
   }
 
   async initialize(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
+    const filePath = this.getFilePath('json');
+    await mkdir(dirname(filePath), { recursive: true });
     
     try {
-      await access(this.filePath);
-      const content = await readFile(this.filePath, 'utf8');
+      await access(filePath);
+      const content = await readFile(filePath, 'utf8');
       
       if (content.trim()) {
-        const decrypted = this.vault 
-          ? this.vault.decrypt(JSON.parse(content))
-          : content;
-        this.data = JSON.parse(decrypted);
+        let jsonContent: string;
+        
+        if (this.crypto) {
+          const encrypted = JSON.parse(content);
+          jsonContent = this.crypto.decrypt(encrypted);
+        } else {
+          jsonContent = content;
+        }
+        
+        this.cache = JSON.parse(jsonContent);
       }
     } catch (err: any) {
-      if (err.code !== 'ENOENT') throw err;
-      // Arquivo não existe, começa vazio
+      if (err.code !== 'ENOENT') {
+        // Se falhar na descriptografia, limpa (chave errada)
+        console.warn('Failed to load existing data, starting fresh');
+        this.cache = [];
+      }
     }
 
-    // Autosave periódico
-    this.autosaveInterval = setInterval(() => {
-      if (this.dirty) this.flush().catch(console.error);
-    }, this.autosaveMs);
+    // Autosave
+    if (this.autosaveInterval > 0) {
+      this.autosaveTimer = setInterval(() => {
+        if (this.dirty) this.flush().catch(console.error);
+      }, this.autosaveInterval);
+    }
+    
+    this.isInitialized = true;
   }
 
   async append(entry: LogEntry): Promise<void> {
-    this.data.push(entry);
-    this.dirty = true;
+    if (!this.isInitialized) throw new Error('Storage not initialized');
     
-    // Flush imediato se não houver autosave ou se for operação crítica
-    if (!this.autosaveInterval) {
-      await this.flush();
+    // Calcula checksum se necessário
+    if (this.config.enableChecksums) {
+      const { createHash } = await import('crypto');
+      entry.checksum = createHash('sha256')
+        .update(JSON.stringify({ ...entry, checksum: '' }))
+        .digest('hex');
     }
-  }
-
-  async readAll(): Promise<LogEntry[]> {
-    return [...this.data];
+    
+    this.cache.push(entry);
+    this.dirty = true;
   }
 
   async *readStream(): AsyncGenerator<LogEntry> {
-    for (const entry of this.data) {
+    for (const entry of this.cache) {
       yield entry;
     }
   }
 
   async flush(): Promise<void> {
-    if (!this.dirty) return;
+    if (!this.dirty || !this.isInitialized) return;
     
-    await this.locker.withLock(this.lockPath, async () => {
-      const content = JSON.stringify(this.data, null, 2);
-      const toWrite = this.vault 
-        ? JSON.stringify(this.vault.encrypt(content))
-        : content;
+    const filePath = this.getFilePath('json');
+    const lockPath = `${filePath}.lock`;
+    
+    await this.locker.withLock(lockPath, async () => {
+      const content = JSON.stringify(this.cache, null, 2);
       
-      await writeFile(this.filePath, toWrite, 'utf8');
+      if (this.crypto) {
+        const encrypted = this.crypto.encrypt(content);
+        await writeFile(filePath, JSON.stringify(encrypted), 'utf8');
+      } else {
+        await writeFile(filePath, content, 'utf8');
+      }
+      
       this.dirty = false;
     });
   }
 
   async close(): Promise<void> {
-    if (this.autosaveInterval) {
-      clearInterval(this.autosaveInterval);
-    }
+    if (this.autosaveTimer) clearInterval(this.autosaveTimer);
     await this.flush();
-    this.data = [];
+    this.cache = [];
+    this.isInitialized = false;
+  }
+
+  async compact(): Promise<void> {
+    // Remove duplicados (mantém último estado)
+    const seen = new Map<string, LogEntry>();
+    
+    for (const entry of this.cache) {
+      const key = `${entry.collection}:${entry.id}`;
+      if (entry.op === 'DELETE') {
+        seen.delete(key);
+      } else {
+        seen.set(key, entry);
+      }
+    }
+    
+    this.cache = Array.from(seen.values());
+    this.dirty = true;
+    await this.flush();
   }
 }

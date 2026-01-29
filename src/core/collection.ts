@@ -1,8 +1,5 @@
-import { LogEntry, IStorage } from '../storage/base';
-import { IndexManager } from './indexer';
-import { TransactionManager } from './transaction';
-import { ValidationError } from '../utils/errors';
-import { v7 as uuidv7 } from 'uuid';
+import { BaseStorage, LogEntry } from '../storage';
+import { CryptoManager } from '../crypto/manager';
 
 export interface QueryOptions {
   filter?: Record<string, any>;
@@ -11,262 +8,145 @@ export interface QueryOptions {
   skip?: number;
 }
 
-export class SecureCollection<T extends Record<string, any>> {
+export class Collection<T extends Record<string, any>> {
   private data = new Map<string, T>();
-
+  private indexes = new Map<string, Map<any, Set<string>>>();
+  private crypto = new CryptoManager(); // Instância sem chave para hash apenas
+  
   constructor(
     private name: string,
-    private storage: IStorage,
-    private indexer: IndexManager,
-    private txManager?: TransactionManager
-  ) {}
-
-  private generateId(): string {
-    return uuidv7();
+    private storage: BaseStorage // Aceita qualquer storage
+  ) {
+    this.loadFromStorage().catch(console.error);
   }
 
-  private matchesFilter(doc: T, filter: Record<string, any>): boolean {
-    for (const [key, value] of Object.entries(filter)) {
-      if (key.startsWith('$')) {
-        if (key === '$or') {
-          if (!Array.isArray(value)) return false;
-          return value.some((subFilter: any) => this.matchesFilter(doc, subFilter));
-        }
-        if (key === '$and') {
-          if (!Array.isArray(value)) return false;
-          return value.every((subFilter: any) => this.matchesFilter(doc, subFilter));
-        }
-        if (key === '$gt') {
-          const [field, val] = Object.entries(value)[0];
-          const docVal = this.getNestedValue(doc, field);
-          return docVal > val;
-        }
-        if (key === '$gte') {
-          const [field, val] = Object.entries(value)[0];
-          const docVal = this.getNestedValue(doc, field);
-          return docVal >= val;
-        }
-        if (key === '$lt') {
-          const [field, val] = Object.entries(value)[0];
-          const docVal = this.getNestedValue(doc, field);
-          return docVal < val;
-        }
-        if (key === '$lte') {
-          const [field, val] = Object.entries(value)[0];
-          const docVal = this.getNestedValue(doc, field);
-          return docVal <= val;
-        }
-        if (key === '$ne') {
-          const [field, val] = Object.entries(value)[0];
-          const docVal = this.getNestedValue(doc, field);
-          return docVal !== val;
-        }
-        if (key === '$in') {
-          const [field, arr] = Object.entries(value)[0];
-          const docVal = this.getNestedValue(doc, field);
-          return Array.isArray(arr) && arr.includes(docVal);
-        }
-        continue;
+  private async loadFromStorage(): Promise<void> {
+    try {
+      for await (const entry of this.storage.readStream()) {
+        this.applyLogEntry(entry);
       }
-      
-      const docValue = this.getNestedValue(doc, key);
-      if (docValue !== value) return false;
+    } catch (err) {
+      console.error(`Failed to load collection ${this.name}:`, err);
     }
-    return true;
   }
 
-  private getNestedValue(obj: any, path: string): any {
-    return path.split('.').reduce((o, p) => o?.[p], obj);
+  private applyLogEntry(entry: LogEntry): void {
+    if (entry.collection !== this.name) return;
+    
+    const id = entry.id;
+    
+    switch (entry.op) {
+      case 'INSERT':
+      case 'UPDATE':
+        const existing = this.data.get(id);
+        if (existing) {
+          this.removeFromIndexes(id, existing);
+        }
+        this.data.set(id, entry.data as T);
+        this.addToIndexes(id, entry.data as T);
+        break;
+        
+      case 'DELETE':
+        const old = this.data.get(id);
+        if (old) {
+          this.removeFromIndexes(id, old);
+        }
+        this.data.delete(id);
+        break;
+    }
   }
 
-  async insert(doc: Omit<T, '_id'> & { _id?: string }, txId?: string): Promise<T> {
-    const id = doc._id || this.generateId();
-    const fullDoc = { ...doc, _id: id } as unknown as T;
+  private addToIndexes(id: string, doc: T): void {
+    for (const [field, index] of this.indexes) {
+      const value = (doc as any)[field];
+      if (value !== undefined) {
+        if (!index.has(value)) index.set(value, new Set());
+        index.get(value)!.add(id);
+      }
+    }
+  }
+
+  private removeFromIndexes(id: string, doc: T): void {
+    for (const [field, index] of this.indexes) {
+      const value = (doc as any)[field];
+      if (value !== undefined) {
+        index.get(value)?.delete(id);
+      }
+    }
+  }
+
+  async insert(doc: Omit<T, '_id'> & { _id?: string }): Promise<T> {
+    const id = doc._id || crypto.randomUUID();
     
     if (this.data.has(id)) {
-      throw new ValidationError(`Document with id ${id} already exists`);
+      throw new Error(`Document with id ${id} already exists`);
     }
-
-    // Verifica índices únicos
-    const uniqueIndexes = this.indexer.getIndexDefinitions(this.name).filter(idx => idx.unique);
-    for (const idx of uniqueIndexes) {
-      const val = this.getNestedValue(fullDoc, idx.fields[0]);
-      if (val !== undefined) {
-        const existing = this.indexer.queryByIndex(this.name, { [idx.fields[0]]: val });
-        if (existing && existing.size > 0) {
-          throw new ValidationError(`Unique constraint violation on ${idx.fields.join(',')}`);
-        }
-      }
-    }
-
-    if (txId && this.txManager) {
-      await this.txManager.addOperation(txId, {
-        type: 'insert',
-        collection: this.name,
-        id,
-        newData: fullDoc
-      });
-    }
-
+    
+    const fullDoc = { ...doc, _id: id } as T;
+    
     await this.storage.append({
       op: 'INSERT',
       collection: this.name,
       id,
       data: fullDoc,
       checksum: '',
-      timestamp: Date.now(),
-      txId
+      timestamp: Date.now()
     });
-
+    
     this.data.set(id, fullDoc);
-    this.indexer.indexDocument(this.name, id, fullDoc);
+    this.addToIndexes(id, fullDoc);
     
     return fullDoc;
   }
 
-  async findOne(filter: Record<string, any>): Promise<T | null> {
-    const indexed = this.indexer.queryByIndex(this.name, filter);
-    
-    if (indexed) {
-      for (const id of indexed) {
-        const doc = this.data.get(id);
-        if (doc && this.matchesFilter(doc, filter)) return doc;
-      }
-    }
-
-    for (const doc of this.data.values()) {
-      if (this.matchesFilter(doc, filter)) return doc;
-    }
-    
-    return null;
-  }
-
-  async findAll(options: QueryOptions = {}): Promise<T[]> {
-    let results: T[] = Array.from(this.data.values());
-    
-    if (options.filter) {
-      results = results.filter(doc => this.matchesFilter(doc, options.filter!));
-    }
-    
-    if (options.sort) {
-      results.sort((a, b) => {
-        for (const [field, order] of Object.entries(options.sort!)) {
-          const aVal = this.getNestedValue(a, field);
-          const bVal = this.getNestedValue(b, field);
-          if (aVal < bVal) return order === 1 ? -1 : 1;
-          if (aVal > bVal) return order === 1 ? 1 : -1;
-        }
-        return 0;
-      });
-    }
-    
-    if (options.skip) {
-      results = results.slice(options.skip);
-    }
-    
-    if (options.limit) {
-      results = results.slice(0, options.limit);
-    }
-    
-    return results;
-  }
-
-  async *findStream(options: QueryOptions = {}): AsyncGenerator<T> {
-    if (options.sort) {
-      const all = await this.findAll(options);
-      for (const doc of all) yield doc;
-      return;
-    }
-
+  async update(filter: Partial<T>, updates: Partial<T>): Promise<number> {
     let count = 0;
-    let skipped = 0;
-
-    for (const doc of this.data.values()) {
-      if (options.filter && !this.matchesFilter(doc, options.filter)) continue;
-
-      if (options.skip && skipped < options.skip) {
-        skipped++;
-        continue;
-      }
-
-      if (options.limit && count >= options.limit) break;
-
-      yield doc;
-      count++;
-    }
-  }
-
-  async update(filter: Record<string, any>, updates: Partial<T>, txId?: string): Promise<number> {
-    let count = 0;
-    const docsToUpdate: Array<{ id: string; oldDoc: T; newDoc: T }> = [];
     
     for (const [id, doc] of this.data.entries()) {
       if (this.matchesFilter(doc, filter)) {
         const newDoc = { ...doc, ...updates, _id: id } as unknown as T;
-        docsToUpdate.push({ id, oldDoc: doc, newDoc });
-      }
-    }
-    
-    for (const { id, oldDoc, newDoc } of docsToUpdate) {
-      if (txId && this.txManager) {
-        await this.txManager.addOperation(txId, {
-          type: 'update',
+        
+        await this.storage.append({
+          op: 'UPDATE',
           collection: this.name,
           id,
-          previousData: oldDoc,
-          newData: newDoc
+          data: newDoc,
+          checksum: '',
+          timestamp: Date.now()
         });
+        
+        this.removeFromIndexes(id, doc);
+        this.data.set(id, newDoc);
+        this.addToIndexes(id, newDoc);
+        count++;
       }
-      
-      await this.storage.append({
-        op: 'UPDATE',
-        collection: this.name,
-        id,
-        data: newDoc,
-        checksum: '',
-        timestamp: Date.now(),
-        txId
-      });
-      
-      this.indexer.removeDocument(this.name, id, oldDoc);
-      this.data.set(id, newDoc);
-      this.indexer.indexDocument(this.name, id, newDoc);
-      count++;
     }
     
     return count;
   }
 
-  async remove(filter: Record<string, any>, txId?: string): Promise<number> {
+  async delete(filter: Partial<T>): Promise<number> {
     let count = 0;
-    const toDelete: Array<{ id: string; doc: T }> = [];
+    const toDelete: string[] = [];
     
     for (const [id, doc] of this.data.entries()) {
       if (this.matchesFilter(doc, filter)) {
-        toDelete.push({ id, doc });
+        toDelete.push(id);
       }
     }
     
-    for (const { id, doc: oldDoc } of toDelete) {
-      if (txId && this.txManager) {
-        await this.txManager.addOperation(txId, {
-          type: 'delete',
-          collection: this.name,
-          id,
-          previousData: oldDoc
-        });
-      }
+    for (const id of toDelete) {
+      const doc = this.data.get(id)!;
       
       await this.storage.append({
         op: 'DELETE',
         collection: this.name,
         id,
         checksum: '',
-        timestamp: Date.now(),
-        txId
+        timestamp: Date.now()
       });
       
-      this.indexer.removeDocument(this.name, id, oldDoc);
+      this.removeFromIndexes(id, doc);
       this.data.delete(id);
       count++;
     }
@@ -274,26 +154,77 @@ export class SecureCollection<T extends Record<string, any>> {
     return count;
   }
 
-  createIndex(field: string | string[], options?: { unique?: boolean }): void {
-    this.indexer.createIndex(this.name, field, options);
+  async findOne(filter: Partial<T>): Promise<T | null> {
+    // Tenta usar índice primeiro
+    const indexedId = this.queryByIndex(filter);
+    if (indexedId) {
+      return this.data.get(indexedId) || null;
+    }
+    
+    for (const doc of this.data.values()) {
+      if (this.matchesFilter(doc, filter)) return doc;
+    }
+    return null;
+  }
+
+  async findAll(options: QueryOptions = {}): Promise<T[]> {
+    let results = Array.from(this.data.values());
+    
+    if (options.filter) {
+      results = results.filter(d => this.matchesFilter(d, options.filter!));
+    }
+    
+    if (options.sort) {
+      results.sort((a, b) => {
+        for (const [field, dir] of Object.entries(options.sort!)) {
+          const aVal = (a as any)[field];
+          const bVal = (b as any)[field];
+          if (aVal < bVal) return dir === 1 ? -1 : 1;
+          if (aVal > bVal) return dir === 1 ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    
+    if (options.skip) results = results.slice(options.skip);
+    if (options.limit) results = results.slice(0, options.limit);
+    
+    return results;
+  }
+
+  createIndex(field: keyof T): void {
+    if (this.indexes.has(field as string)) return;
+    this.indexes.set(field as string, new Map());
+    
+    // Indexa existentes
+    for (const [id, doc] of this.data.entries()) {
+      this.addToIndexes(id, doc);
+    }
+  }
+
+  private matchesFilter(doc: T, filter: Partial<T>): boolean {
+    for (const [key, value] of Object.entries(filter)) {
+      if ((doc as any)[key] !== value) return false;
+    }
+    return true;
+  }
+
+  private queryByIndex(filter: Partial<T>): string | null {
+    const entries = Object.entries(filter);
+    if (entries.length !== 1) return null;
+    
+    const [field, value] = entries[0];
+    const index = this.indexes.get(field);
+    if (!index) return null;
+    
+    const ids = index.get(value);
+    if (ids && ids.size > 0) {
+      return Array.from(ids)[0];
+    }
+    return null;
   }
 
   count(): number {
     return this.data.size;
-  }
-
-  loadFromLog(entry: LogEntry): void {
-    if (entry.collection !== this.name) return;
-    
-    if (entry.op === 'INSERT' || entry.op === 'UPDATE') {
-      this.data.set(entry.id, entry.data as T);
-      this.indexer.indexDocument(this.name, entry.id, entry.data as Record<string, any>);
-    } else if (entry.op === 'DELETE') {
-      const oldDoc = this.data.get(entry.id);
-      if (oldDoc) {
-        this.indexer.removeDocument(this.name, entry.id, oldDoc as Record<string, any>);
-      }
-      this.data.delete(entry.id);
-    }
   }
 }

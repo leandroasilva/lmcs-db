@@ -1,33 +1,12 @@
-// Core
-export { LmcsDB, DatabaseConfig } from './core/database';
-export { SecureCollection, QueryOptions } from './core/collection';
-export { TransactionContext } from './core/transaction-context';
-export { Transaction, TransactionManager } from './core/transaction';
-export { IndexManager, IndexDefinition } from './core/indexer';
+// Database
+export { Database, createDatabase, DatabaseOptions, StorageType } from './core/database';
+export { Collection, QueryOptions } from './core/collection';
 
-// Storage (todos os tipos)
-export {
-  StorageFactory,
-  BaseStorage,
-  StorageConfig,
-  StorageType,
-  AOLStorage,
-  JSONStorage,
-  MemoryStorage,
-  BinaryStorage,
-  LogEntry
-} from './storage';
+// Storage
+export { BaseStorage, StorageConfig, LogEntry } from './storage/base';
+export { MemoryStorage } from './storage/memory';
+export { JSONStorage } from './storage/json';
+export { AOLStorage } from './storage/aol';
 
 // Crypto
-export { CryptoVault, EncryptedPayload } from './crypto/vault';
-
-// Errors
-export { 
-  LMCSError, 
-  ValidationError, 
-  CorruptionError, 
-  ConcurrencyError,
-  TransactionError 
-} from './utils/errors';
-
-export { FileLocker } from './utils/lock';
+export { CryptoManager, EncryptedData } from './crypto/manager';

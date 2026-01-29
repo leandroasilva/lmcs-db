@@ -1,16 +1,18 @@
-import { LogEntry } from './aol';
+export interface LogEntry {
+  op: 'INSERT' | 'UPDATE' | 'DELETE' | 'BEGIN' | 'COMMIT' | 'ROLLBACK';
+  collection: string;
+  id: string;
+  data?: unknown;
+  checksum: string;
+  timestamp: number;
+  txId?: string;
+}
 
 export interface StorageConfig {
   dbPath: string;
   dbName: string;
   encryptionKey?: string;
-}
-
-export interface FindOptions {
-  filter?: Record<string, any>;
-  sort?: Record<string, 1 | -1>;
-  limit?: number;
-  skip?: number;
+  enableChecksums?: boolean;
 }
 
 export abstract class BaseStorage {
@@ -22,13 +24,12 @@ export abstract class BaseStorage {
 
   abstract initialize(): Promise<void>;
   abstract append(entry: LogEntry): Promise<void>;
-  abstract readAll(): Promise<LogEntry[]>;
-  abstract *readStream(): AsyncGenerator<LogEntry>;
+  abstract readStream(): AsyncGenerator<LogEntry>;
   abstract flush(): Promise<void>;
   abstract close(): Promise<void>;
+  abstract clear?(): Promise<void>;
   abstract compact?(): Promise<void>;
   
-  // Utilitários comuns
   protected getFilePath(extension: string): string {
     return `${this.config.dbPath}/${this.config.dbName}.${extension}`;
   }

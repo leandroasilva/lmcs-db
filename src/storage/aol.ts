@@ -1,78 +1,75 @@
+import { BaseStorage, LogEntry, StorageConfig } from './base';
+import { CryptoManager } from '../crypto/manager';
 import { appendFile, readFile, writeFile, rename, open, mkdir } from 'fs/promises';
-import { join, dirname } from 'path';
+import { dirname } from 'path';
 import { FileLocker } from '../utils/lock';
-import { CryptoVault } from '../crypto/vault';
-import { CorruptionError } from '../utils/errors';
 import { createHash } from 'crypto';
-import { IStorage, LogEntry } from './base';
 
-export { LogEntry };
-
-export interface AOLConfig {
-  encryptionKey?: string;
-  compactionInterval?: number;
-  enableChecksums?: boolean;
-}
-
-export class AOLStorage implements IStorage {
-  private filePath: string;
-  private vault?: CryptoVault;
-  private writeBuffer: LogEntry[] = [];
-  private readonly BUFFER_SIZE = 100;
-  private compactionTimer?: NodeJS.Timeout;
+export class AOLStorage extends BaseStorage {
+  private buffer: LogEntry[] = [];
+  private crypto?: CryptoManager;
   private locker = new FileLocker();
-  private config: Required<AOLConfig>;
+  private bufferSize = 100;
+  private compactionTimer?: NodeJS.Timeout;
+  private isInitialized = false;
+  private writeCount = 0;
 
-  constructor(
-    private dbPath: string, 
-    private dbName: string,
-    config: AOLConfig
-  ) {
-    this.filePath = join(dbPath, `${dbName}.aol`);
-    this.config = {
-      encryptionKey: config.encryptionKey ?? '',
-      compactionInterval: config.compactionInterval ?? 60000,
-      enableChecksums: config.enableChecksums ?? true
-    };
-    
+  constructor(config: StorageConfig & { compactionInterval?: number, bufferSize?: number }) {
+    super(config);
     if (config.encryptionKey) {
-      this.vault = new CryptoVault(config.encryptionKey);
+      this.crypto = new CryptoManager(config.encryptionKey);
     }
+    this.bufferSize = config.bufferSize || 100;
     
-    if (this.config.compactionInterval > 0) {
-      this.startAutoCompaction();
+    if (config.compactionInterval && config.compactionInterval > 0) {
+      this.compactionTimer = setInterval(() => {
+        this.compact().catch(console.error);
+      }, config.compactionInterval);
     }
   }
 
-  private async ensureDir(): Promise<void> {
-    await mkdir(dirname(this.filePath), { recursive: true });
+  async initialize(): Promise<void> {
+    const filePath = this.getFilePath('aol');
+    await mkdir(dirname(filePath), { recursive: true });
+    this.isInitialized = true;
   }
 
   async append(entry: LogEntry): Promise<void> {
-    if (this.config.enableChecksums) {
-      entry.checksum = this.calculateChecksum({ ...entry, checksum: '' });
-    }
-
-    this.writeBuffer.push(entry);
+    if (!this.isInitialized) throw new Error('Storage not initialized');
     
-    if (this.writeBuffer.length >= this.BUFFER_SIZE) {
+    if (this.config.enableChecksums) {
+      entry.checksum = createHash('sha256')
+        .update(JSON.stringify({ ...entry, checksum: '' }))
+        .digest('hex');
+    }
+    
+    this.buffer.push(entry);
+    this.writeCount++;
+    
+    if (this.buffer.length >= this.bufferSize) {
       await this.flush();
     }
   }
 
   async flush(): Promise<void> {
-    if (this.writeBuffer.length === 0) return;
-    await this.ensureDir();
-
-    const lines = this.writeBuffer.map(entry => {
-      const line = JSON.stringify(entry);
-      return this.vault ? JSON.stringify(this.vault.encrypt(line)) : line;
-    });
-
-    await this.locker.withLock(this.filePath, async () => {
-      await appendFile(this.filePath, lines.join('\n') + '\n', 'utf8');
+    if (this.buffer.length === 0 || !this.isInitialized) return;
+    
+    const filePath = this.getFilePath('aol');
+    const lockPath = `${filePath}.lock`;
+    
+    await this.locker.withLock(lockPath, async () => {
+      const lines = this.buffer.map(entry => {
+        const line = JSON.stringify(entry);
+        if (this.crypto) {
+          return JSON.stringify(this.crypto.encrypt(line));
+        }
+        return line;
+      });
       
-      const fd = await open(this.filePath, 'a');
+      await appendFile(filePath, lines.join('\n') + '\n', 'utf8');
+      
+      // fsync para durabilidade
+      const fd = await open(filePath, 'a');
       try {
         await fd.sync();
       } finally {
@@ -80,92 +77,106 @@ export class AOLStorage implements IStorage {
       }
     });
     
-    this.writeBuffer = [];
+    this.buffer = [];
   }
 
   async *readStream(): AsyncGenerator<LogEntry> {
     await this.flush();
     
-    const content = await readFile(this.filePath, 'utf8').catch(() => '');
-    const lines = content.split('\n').filter(Boolean);
-
-    for (const line of lines) {
-      try {
-        const decrypted = this.vault 
-          ? this.vault.decrypt(JSON.parse(line)) 
-          : line;
-        
-        const entry: LogEntry = JSON.parse(decrypted);
-        
-        if (this.config.enableChecksums && entry.op !== 'BEGIN' && entry.op !== 'COMMIT' && entry.op !== 'ROLLBACK') {
-          const expected = entry.checksum;
-          const entryToCheck = { ...entry };
-          delete (entryToCheck as any).checksum;
+    const filePath = this.getFilePath('aol');
+    
+    try {
+      const content = await readFile(filePath, 'utf8');
+      const lines = content.split('\n').filter(l => l.trim());
+      
+      for (const line of lines) {
+        try {
+          let jsonStr: string;
           
-          if (this.calculateChecksum(entryToCheck) !== expected) {
-            throw new CorruptionError(`Checksum failed for entry ${entry.id} in collection ${entry.collection}`);
+          if (this.crypto) {
+            const encrypted = JSON.parse(line);
+            jsonStr = this.crypto.decrypt(encrypted);
+          } else {
+            jsonStr = line;
           }
+          
+          const entry: LogEntry = JSON.parse(jsonStr);
+          
+          // Verifica checksum
+          if (this.config.enableChecksums && entry.checksum) {
+            const expected = entry.checksum;
+            const checkEntry = { ...entry };
+            delete (checkEntry as any).checksum;
+            const actual = createHash('sha256')
+              .update(JSON.stringify(checkEntry))
+              .digest('hex');
+              
+            if (actual !== expected) {
+              console.warn(`Checksum mismatch for entry ${entry.id}, skipping`);
+              continue;
+            }
+          }
+          
+          yield entry;
+        } catch (err) {
+          console.warn('Corrupted log entry skipped:', err);
         }
-        
-        yield entry;
-      } catch (err) {
-        if (err instanceof CorruptionError) throw err;
-        if (err instanceof Error && err.message.includes('Decryption failed')) throw err;
-        console.warn('Skipping corrupted entry:', err);
       }
+    } catch (err: any) {
+      if (err.code !== 'ENOENT') throw err;
     }
-  }
-
-  private calculateChecksum(entry: Omit<LogEntry, 'checksum'>): string {
-    return createHash('sha256')
-      .update(JSON.stringify(entry))
-      .digest('hex');
   }
 
   async compact(): Promise<void> {
     await this.flush();
-    const tempFile = `${this.filePath}.tmp`;
+    
+    const filePath = this.getFilePath('aol');
+    const tempFile = `${filePath}.tmp`;
+    
     const state = new Map<string, LogEntry>();
     
     for await (const entry of this.readStream()) {
-      if (entry.op === 'BEGIN' || entry.op === 'COMMIT' || entry.op === 'ROLLBACK') continue;
-      
       const key = `${entry.collection}:${entry.id}`;
+      
       if (entry.op === 'DELETE') {
         state.delete(key);
-      } else {
+      } else if (entry.op !== 'BEGIN' && entry.op !== 'COMMIT' && entry.op !== 'ROLLBACK') {
         state.set(key, entry);
       }
     }
-
+    
     const entries = Array.from(state.values());
+    
     if (entries.length === 0) {
-      await writeFile(this.filePath, '', 'utf8');
+      await writeFile(filePath, '', 'utf8');
       return;
     }
-
+    
     const lines = entries.map(e => {
       const line = JSON.stringify(e);
-      return this.vault ? JSON.stringify(this.vault.encrypt(line)) : line;
+      return this.crypto ? JSON.stringify(this.crypto.encrypt(line)) : line;
     });
-      
+    
     await writeFile(tempFile, lines.join('\n'), 'utf8');
     
-    await this.locker.withLock(this.filePath, async () => {
-      await rename(tempFile, this.filePath);
+    const lockPath = `${filePath}.lock`;
+    await this.locker.withLock(lockPath, async () => {
+      await rename(tempFile, filePath);
     });
+    
+    console.log(`Compaction complete: ${this.writeCount} writes -> ${entries.length} entries`);
   }
 
-  private startAutoCompaction(): void {
-    this.compactionTimer = setInterval(() => {
-      this.compact().catch(err => console.error('Auto-compaction failed:', err));
-    }, this.config.compactionInterval);
+  async close(): Promise<void> {
+    await this.flush();
+    if (this.compactionTimer) clearInterval(this.compactionTimer);
+    this.isInitialized = false;
   }
 
-  close(): void {
-    if (this.compactionTimer) {
-      clearInterval(this.compactionTimer);
-      this.compactionTimer = undefined;
-    }
+  getStats() {
+    return {
+      buffered: this.buffer.length,
+      totalWrites: this.writeCount
+    };
   }
 }

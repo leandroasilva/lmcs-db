@@ -1,11 +1,21 @@
-import { IStorage, LogEntry } from './base';
+import { BaseStorage, LogEntry, StorageConfig } from './base';
 
-export class MemoryStorage implements IStorage {
+export class MemoryStorage extends BaseStorage {
   private logs: LogEntry[] = [];
+  private isInitialized = false;
+
+  constructor(config: StorageConfig) {
+    super(config);
+  }
+
+  async initialize(): Promise<void> {
+    this.isInitialized = true;
+    this.logs = [];
+  }
 
   async append(entry: LogEntry): Promise<void> {
-    const cloned = JSON.parse(JSON.stringify(entry));
-    this.logs.push(cloned);
+    if (!this.isInitialized) throw new Error('Storage not initialized');
+    this.logs.push({ ...entry });
   }
 
   async *readStream(): AsyncGenerator<LogEntry> {
@@ -14,26 +24,20 @@ export class MemoryStorage implements IStorage {
     }
   }
 
-  async flush(): Promise<void> {}
-
-  async compact(): Promise<void> {
-    const state = new Map<string, LogEntry>();
-    
-    for (const entry of this.logs) {
-      if (entry.op === 'BEGIN' || entry.op === 'COMMIT' || entry.op === 'ROLLBACK') continue;
-      
-      const key = `${entry.collection}:${entry.id}`;
-      if (entry.op === 'DELETE') {
-        state.delete(key);
-      } else {
-        state.set(key, entry);
-      }
-    }
-
-    this.logs = Array.from(state.values());
+  async flush(): Promise<void> {
+    // Nada a fazer em memória
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.logs = [];
+    this.isInitialized = false;
+  }
+
+  async clear(): Promise<void> {
+    this.logs = [];
+  }
+
+  getSize(): number {
+    return this.logs.length;
   }
 }
