@@ -34,7 +34,7 @@ interface User {
 
 // Create database
 const db = await Database.create({
-  storageType: StorageType.Binary,
+  storageType: "binary",
   databaseName: "myapp",
   encryptionKey: "your-secret-key-32-chars!!", // Optional
 });
@@ -103,7 +103,7 @@ AOL (Append-Only Log)
 
 ```typescript
 const db = await Database.create({
-  storageType: StorageType.AOL,
+  storageType: "aol",
   databaseName: "events",
   bufferSize: 1000, // Buffer before fsync
   compactionInterval: 60000, // Automatic cleanup every 60s
@@ -193,7 +193,7 @@ Authentication tag prevents tampering
 
 ```typescript
 const db = await Database.create({
-  storageType: StorageType.Binary,
+  storageType: "binary",
   databaseName: "secrets",
   encryptionKey: process.env.DB_KEY, // Load from secure source
 });
