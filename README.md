@@ -23,7 +23,7 @@ npm install lmcs-db
 ```
 
 ```typescript
-import { Database, StorageType } from "lmcs-db";
+import { Database } from "lmcs-db";
 
 interface User {
   _id?: string;
