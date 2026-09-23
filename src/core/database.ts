@@ -14,7 +14,8 @@ export interface DatabaseOptions {
   encryptionKey?: string;
   customPath?: string;
   compactionInterval?: number; // para AOL
-  bufferSize?: number;         // para AOL
+  bufferSize?: number;         // para AOL e Binary
+  flushInterval?: number;      // para Binary
   autosaveInterval?: number;   // para JSON
   enableChecksums?: boolean;
 }
@@ -53,7 +54,11 @@ export class Database {
         });
         break;
       case 'binary':
-        this.storage = new BinaryStorage(config);
+        this.storage = new BinaryStorage({
+          ...config,
+          bufferSize: options.bufferSize,
+          flushInterval: options.flushInterval
+        });
         break;
       default:
         throw new Error(`Unknown storage type: ${options.storageType}`);

@@ -7,6 +7,8 @@ export interface IStorage {
   close(): Promise<void>;
   clear?(): Promise<void>;
   compact?(): Promise<void>;
+  on(event: 'error', listener: (error: Error) => void): this;
+  off(event: 'error', listener: (error: Error) => void): this;
 }
 
 export interface LogEntry {
@@ -28,6 +30,7 @@ export interface StorageConfig {
 
 export abstract class BaseStorage implements IStorage {
   protected config: StorageConfig;
+  private errorListeners: Set<(error: Error) => void> = new Set();
   
   constructor(config: StorageConfig) {
     this.config = config;
@@ -43,5 +46,29 @@ export abstract class BaseStorage implements IStorage {
   
   protected getFilePath(extension: string): string {
     return `${this.config.dbPath}/${this.config.dbName}.${extension}`;
+  }
+
+  on(event: 'error', listener: (error: Error) => void): this {
+    if (event === 'error') {
+      this.errorListeners.add(listener);
+    }
+    return this;
+  }
+
+  off(event: 'error', listener: (error: Error) => void): this {
+    if (event === 'error') {
+      this.errorListeners.delete(listener);
+    }
+    return this;
+  }
+
+  protected emitError(error: Error): void {
+    for (const listener of this.errorListeners) {
+      try {
+        listener(error);
+      } catch {
+        // Ignore listener errors
+      }
+    }
   }
 }

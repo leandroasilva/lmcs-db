@@ -12,19 +12,31 @@ interface BinaryHeader {
   encrypted: boolean;
 }
 
+export interface BinaryStorageConfig extends StorageConfig {
+  bufferSize?: number;
+  flushInterval?: number;
+}
+
 export class BinaryStorage extends BaseStorage {
   private data: LogEntry[] = [];
+  private buffer: LogEntry[] = [];
   private locker = new FileLocker();
   private crypto?: CryptoManager;
   private filePath: string;
   private lockPath: string;
   private readonly MAGIC = "LMCS";
   private readonly VERSION = 1;
+  private bufferSize: number;
+  private flushInterval: number;
+  private flushTimer?: NodeJS.Timeout;
+  private isInitialized = false;
 
-  constructor(config: StorageConfig) {
+  constructor(config: BinaryStorageConfig) {
     super(config);
     this.filePath = this.getFilePath("bin");
     this.lockPath = `${config.dbPath}/${config.dbName}.bin.lock`;
+    this.bufferSize = config.bufferSize ?? 100;
+    this.flushInterval = config.flushInterval ?? 1000;
 
     if (config.encryptionKey) {
       this.crypto = new CryptoManager(config.encryptionKey);
@@ -45,12 +57,29 @@ export class BinaryStorage extends BaseStorage {
     } catch (err: any) {
       if (err.code !== "ENOENT") throw err;
     }
+
+    this.isInitialized = true;
+    this.startFlushTimer();
+  }
+
+  private startFlushTimer(): void {
+    if (this.flushInterval > 0) {
+      this.flushTimer = setInterval(() => {
+        if (this.buffer.length > 0) {
+          this.flush().catch(err => this.emitError(err));
+        }
+      }, this.flushInterval);
+    }
   }
 
   async append(entry: LogEntry): Promise<void> {
-    this.data.push(entry);
-    // Binary always does full rewrite (not append-only)
-    await this.flush();
+    if (!this.isInitialized) throw new Error("Storage not initialized");
+
+    this.buffer.push(entry);
+
+    if (this.buffer.length >= this.bufferSize) {
+      await this.flush();
+    }
   }
 
   async readAll(): Promise<LogEntry[]> {
@@ -64,25 +93,31 @@ export class BinaryStorage extends BaseStorage {
   }
 
   async flush(): Promise<void> {
+    if (this.buffer.length === 0 || !this.isInitialized) return;
+
     await this.locker.withLock(this.lockPath, async () => {
+      this.data.push(...this.buffer);
       const buffer = this.serialize(this.data);
       await writeFile(this.filePath, buffer);
+      this.buffer = [];
     });
   }
 
   async close(): Promise<void> {
+    if (this.flushTimer) clearInterval(this.flushTimer);
     await this.flush();
     this.data = [];
+    this.isInitialized = false;
   }
 
   async clear(): Promise<void> {
     this.data = [];
+    this.buffer = [];
     await this.flush();
   }
 
   async compact(): Promise<void> {
-    // Binary storage rewrites on every append, so it's always compact
-    return Promise.resolve();
+    await this.flush();
   }
 
   private serialize(entries: LogEntry[]): Buffer {
@@ -141,8 +176,8 @@ export class BinaryStorage extends BaseStorage {
 
       return JSON.parse(jsonStr);
     } catch (error) {
-      console.error("Failed to deserialize binary storage:", error);
-      return [];
+      this.emitError(new Error(`Failed to deserialize binary storage: ${error}`));
+      throw error;
     }
   }
 }

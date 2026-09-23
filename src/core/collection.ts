@@ -10,30 +10,59 @@ export interface QueryOptions {
   batchSize?: number;
 }
 
+export interface IndexOptions {
+  unique?: boolean;
+  sparse?: boolean;
+}
+
+type ErrorListener = (error: Error) => void;
+
 export class Collection<T extends Record<string, any>> {
   private data = new Map<string, T>();
   private indexes = new Map<string, Map<any, Set<string>>>();
-  private crypto = new CryptoManager(); // Instância sem chave para hash apenas
+  private compoundIndexes = new Map<string, Map<string, Set<string>>>();
+  private crypto = new CryptoManager();
+  private errorListeners: Set<ErrorListener> = new Set();
 
   constructor(
     private name: string,
-    private storage: BaseStorage, // Aceita qualquer storage
+    private storage: BaseStorage,
   ) {
-    this.loadFromStorage().catch(console.error);
+    this.loadFromStorage().catch(err => this.emitError(err));
+  }
+
+  on(event: 'error', listener: ErrorListener): this {
+    if (event === 'error') {
+      this.errorListeners.add(listener);
+    }
+    return this;
+  }
+
+  off(event: 'error', listener: ErrorListener): this {
+    if (event === 'error') {
+      this.errorListeners.delete(listener);
+    }
+    return this;
+  }
+
+  private emitError(error: Error): void {
+    for (const listener of this.errorListeners) {
+      try {
+        listener(error);
+      } catch {
+        // Ignore listener errors
+      }
+    }
   }
 
   private async loadFromStorage(): Promise<void> {
-    try {
-      if (!this.storage.readStream) {
-        throw new Error("Storage does not support streaming");
-      }
+    if (!this.storage.readStream) {
+      throw new Error("Storage does not support streaming");
+    }
 
-      const stream = this.storage.readStream();
-      for await (const entry of stream) {
-        this.applyLogEntry(entry);
-      }
-    } catch (err) {
-      console.error(`Failed to load collection ${this.name}:`, err);
+    const stream = this.storage.readStream();
+    for await (const entry of stream) {
+      this.applyLogEntry(entry);
     }
   }
 
@@ -71,6 +100,16 @@ export class Collection<T extends Record<string, any>> {
         index.get(value)!.add(id);
       }
     }
+
+    for (const [compoundKey, index] of this.compoundIndexes) {
+      const fields = compoundKey.split('\0');
+      const values = fields.map(f => (doc as any)[f]);
+      if (values.every(v => v !== undefined)) {
+        const compoundValue = values.join('\0');
+        if (!index.has(compoundValue)) index.set(compoundValue, new Set());
+        index.get(compoundValue)!.add(id);
+      }
+    }
   }
 
   private removeFromIndexes(id: string, doc: T): void {
@@ -78,6 +117,15 @@ export class Collection<T extends Record<string, any>> {
       const value = (doc as any)[field];
       if (value !== undefined) {
         index.get(value)?.delete(id);
+      }
+    }
+
+    for (const [compoundKey, index] of this.compoundIndexes) {
+      const fields = compoundKey.split('\0');
+      const values = fields.map(f => (doc as any)[f]);
+      if (values.every(v => v !== undefined)) {
+        const compoundValue = values.join('\0');
+        index.get(compoundValue)?.delete(id);
       }
     }
   }
@@ -226,13 +274,37 @@ export class Collection<T extends Record<string, any>> {
     }
   }
 
-  createIndex(field: keyof T): void {
-    if (this.indexes.has(field as string)) return;
-    this.indexes.set(field as string, new Map());
+  createIndex(field: keyof T | string[], options: IndexOptions = {}): void {
+    if (Array.isArray(field)) {
+      const compoundKey = field.join('\0');
+      if (this.compoundIndexes.has(compoundKey)) return;
+      this.compoundIndexes.set(compoundKey, new Map());
 
-    // Indexa existentes
-    for (const [id, doc] of this.data.entries()) {
-      this.addToIndexes(id, doc);
+      for (const [id, doc] of this.data.entries()) {
+        const values = field.map(f => (doc as any)[f]);
+        if (options.sparse && values.some(v => v === undefined)) continue;
+        if (values.every(v => v !== undefined)) {
+          const compoundValue = values.join('\0');
+          if (!this.compoundIndexes.get(compoundKey)!.has(compoundValue)) {
+            this.compoundIndexes.get(compoundKey)!.set(compoundValue, new Set());
+          }
+          this.compoundIndexes.get(compoundKey)!.get(compoundValue)!.add(id);
+        }
+      }
+    } else {
+      if (this.indexes.has(field as string)) return;
+      this.indexes.set(field as string, new Map());
+
+      for (const [id, doc] of this.data.entries()) {
+        const value = (doc as any)[field];
+        if (options.sparse && value === undefined) continue;
+        if (value !== undefined) {
+          if (!this.indexes.get(field as string)!.has(value)) {
+            this.indexes.get(field as string)!.set(value, new Set());
+          }
+          this.indexes.get(field as string)!.get(value)!.add(id);
+        }
+      }
     }
   }
 
@@ -297,20 +369,48 @@ export class Collection<T extends Record<string, any>> {
 
   private queryByIndex(filter: Partial<T>): string | null {
     const entries = Object.entries(filter);
-    if (entries.length !== 1) return null;
+    
+    if (entries.length === 1) {
+      const [field, value] = entries[0];
+      const index = this.indexes.get(field);
+      if (!index) return null;
 
-    const [field, value] = entries[0];
-    const index = this.indexes.get(field);
-    if (!index) return null;
-
-    const ids = index.get(value);
-    if (ids && ids.size > 0) {
-      return Array.from(ids)[0];
+      const ids = index.get(value);
+      if (ids && ids.size > 0) {
+        return Array.from(ids)[0];
+      }
+      return null;
     }
+
+    if (entries.length > 1) {
+      const compoundKey = entries.map(([f]) => f).join('\0');
+      const index = this.compoundIndexes.get(compoundKey);
+      if (!index) return null;
+
+      const compoundValue = entries.map(([, v]) => v).join('\0');
+      const ids = index.get(compoundValue);
+      if (ids && ids.size > 0) {
+        return Array.from(ids)[0];
+      }
+      return null;
+    }
+
     return null;
   }
 
   count(): number {
     return this.data.size;
+  }
+
+  countDocuments(filter?: Partial<T>): number {
+    if (!filter) return this.data.size;
+    
+    let count = 0;
+    for (const doc of this.data.values()) {
+      if (this.matchesFilter(doc, filter)) {
+        count++;
+      }
+    }
+    return count;
   }
 }

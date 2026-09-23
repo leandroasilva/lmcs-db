@@ -2,8 +2,20 @@
   "name": "lmcs-db",
   "version": "2.0.1",
   "description": "Lightweight Modular Collection Storage - Secure & Transactional",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    },
+    "./storage": {
+      "types": "./dist/storage/index.d.ts",
+      "import": "./dist/storage/index.js",
+      "require": "./dist/storage/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
